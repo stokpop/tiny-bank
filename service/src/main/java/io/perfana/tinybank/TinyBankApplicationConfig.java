@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.binder.httpcomponents.hc5.ObservationExecCh
 import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClientConnectionManagerMetricsBinder;
 import io.micrometer.observation.ObservationRegistry;
 import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
@@ -16,6 +17,7 @@ import org.apache.hc.core5.http.HttpRequestInterceptor;
 import org.apache.hc.core5.http.HttpResponseInterceptor;
 import org.apache.hc.core5.http.message.BasicHeader;
 import org.apache.hc.core5.util.TimeValue;
+import org.apache.hc.core5.util.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -65,7 +67,13 @@ public class TinyBankApplicationConfig {
 
         new PoolingHttpClientConnectionManagerMetricsBinder(connectionManager, "tiny-bank-http-pool").bindTo(meterRegistry);
 
+        // limit the wait time for a free connection from the pool
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setConnectionRequestTimeout(Timeout.ofMilliseconds(100))
+                .build();
+
         var httpClientBuilder = HttpClients.custom()
+                .setDefaultRequestConfig(requestConfig)
                 .disableConnectionState() // needed for mTLS connection reuse!
                 .evictExpiredConnections()
                 .evictIdleConnections(TimeValue.ofSeconds(30))
