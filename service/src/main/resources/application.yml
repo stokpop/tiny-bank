@@ -52,6 +52,9 @@ management:
       test_environment: silver
       service: tiny-bank-service
   health:
+    # disable default binders such as databases
+    binders:
+      enabled: false
     # The SSL health indicator eagerly loads all registered SSL bundles at
     # startup, see spring.autoconfigure.exclude above.
     ssl:
