@@ -190,6 +190,18 @@ docker compose down --volumes
 
 Running the `start-test.sh` or `start-test-components.sh` script will start recreate and initialize the metrics components.
 
+## Circuit breakers
+
+With added circuit breakers, check settings:
+
+```shell
+curl -Ss localhost:18080/actuator/circuitbreakers | jq
+```
+
+Wire the load to the wiremocks via toxiproxy:
+
+
+
 ## Credits
 
 <a target="_blank" href="https://icons8.com/icon/21709/bank-euro">bank-euro</a> icon by <a target="_blank" href="https://icons8.com">Icons8</a>
