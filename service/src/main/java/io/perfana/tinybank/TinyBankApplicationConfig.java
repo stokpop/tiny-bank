@@ -27,7 +27,7 @@ public class TinyBankApplicationConfig {
         RequestConfig requestConfig = RequestConfig.custom()
                 .setConnectionRequestTimeout(100, TimeUnit.MILLISECONDS)
                 .setConnectTimeout(100, TimeUnit.MILLISECONDS)
-                .setResponseTimeout(1000, TimeUnit.MILLISECONDS)
+                .setResponseTimeout(800, TimeUnit.MILLISECONDS)
                 .build();
 
         return HttpClientBuilder.create()
