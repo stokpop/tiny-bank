@@ -12,6 +12,7 @@ import org.springframework.web.client.RestTemplate;
 public class BalanceService {
     private static final Logger logger = LoggerFactory.getLogger(BalanceService.class);
     private static final String BALANCE_SERVICE = "balanceService";
+    public static final Balance BALANCE_UNAVAILABLE = new Balance(0, "Not Available");
 
     @Value("${remote.balance.service.url}")
     private String remoteServiceUrl;
@@ -32,6 +33,6 @@ public class BalanceService {
     private Balance getBalanceFallback(String accountNumber, Exception ex) {
         logger.warn("Fallback for getBalance called for account: {}. Error: {}", accountNumber, ex.getMessage());
         // Return a "not available" balance as fallback to avoid confusing customers with 0 EUR
-        return new Balance(0, "Not Available");
+        return BALANCE_UNAVAILABLE;
     }
 }

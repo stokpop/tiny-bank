@@ -6,7 +6,7 @@ Adds basic dashboards to Grafana. Goto `http://localhost:3000` and login with `a
 
 Created database and adds continuous queries to InfluxDB.
 
-The otel-collector scrapes the tiny-bank metrics ands sends it to Prometheus.
+The otel-collector scrapes the tiny-bank metrics and sends it to Prometheus.
 
 To start:
 
