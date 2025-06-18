@@ -24,8 +24,8 @@ public class TestScheduler {
     public static void main(String[] args) {
 
         // Enable debug: use INSTANCE_DEBUG
-        //EventLogger eventLogger = EventLoggerStdOut.INSTANCE;
-        EventLogger eventLogger = EventLoggerStdOut.INSTANCE_DEBUG;
+        EventLogger eventLogger = EventLoggerStdOut.INSTANCE;
+        //EventLogger eventLogger = EventLoggerStdOut.INSTANCE_DEBUG;
 
         final int rampupTimeInSeconds = 10;
         final int constantLoadTimeInSeconds = 120;
@@ -143,21 +143,38 @@ public class TestScheduler {
                     PT280S|run-command(fast-db-10ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=10
                 """;
 
+//        // TODO duplicated so also alerts is receiving events: missing - multiple listeners for events? now based on name
+//        String scheduleScriptSlowBalance =
+//                """
+//                    PT20S|run-command(short-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+//                    PT20S|run-command(short-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+//                    PT40S|run-command(slow-balance-800ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=800
+//                    PT40S|run-command(slow-balance-800ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=800
+//                    PT60S|run-command(slow-balance-1000ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1000
+//                    PT60S|run-command(slow-balance-1000ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1000
+//                    PT80S|run-command(slow-balance-1200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
+//                    PT80S|run-command(slow-balance-1200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
+//                    PT100S|run-command(slow-balance-2000ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=2000
+//                    PT100S|run-command(slow-balance-2000ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=2000
+//                    PT120S|run-command(fast-balance-10ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
+//                    PT120S|run-command(fast-balance-10ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
+//                        """;
+
         // TODO duplicated so also alerts is receiving events: missing - multiple listeners for events? now based on name
         String scheduleScriptSlowBalance =
                 """
                     PT20S|run-command(short-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
                     PT20S|run-command(short-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
-                    PT40S|run-command(slow-balance-800ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=800
-                    PT40S|run-command(slow-balance-800ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=800
-                    PT60S|run-command(slow-balance-1000ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1000
-                    PT60S|run-command(slow-balance-1000ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1000
+                    PT40S|run-command(slow-balance-1200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
+                    PT40S|run-command(slow-balance-1200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
+                    PT60S|run-command(slow-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+                    PT60S|run-command(slow-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
                     PT80S|run-command(slow-balance-1200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
                     PT80S|run-command(slow-balance-1200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
-                    PT100S|run-command(slow-balance-2000ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=2000
-                    PT100S|run-command(slow-balance-2000ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=2000
-                    PT120S|run-command(fast-balance-10ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
-                    PT120S|run-command(fast-balance-10ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
+                    PT110S|run-command(slow-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+                    PT110S|run-command(slow-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+                    PT130S|run-command(fast-balance-10ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
+                    PT130S|run-command(fast-balance-10ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
                         """;
 
         {
@@ -167,7 +184,7 @@ public class TestScheduler {
             //commandConfig.setOnStartTest("docker exec toxiproxy /go/bin/toxiproxy-cli toxic add -n __toxic_name__ -t latency -a latency=0 __proxy_name__");
             commandConfig.setOnStartTest("docker exec toxiproxy /go/bin/toxiproxy-cli toxic add -n bsLatency -t latency -a latency=0 balance-service");
             commandConfig.setOnScheduledEvent("docker exec toxiproxy /go/bin/toxiproxy-cli toxic update -n __toxic_name__ -a latency=__latency_ms__ __proxy_name__");
-            commandConfig.setOnAfterTest("docker exec toxiproxy /go/bin/toxiproxy-cli toxic remove -n __toxic_name__ __proxy_name__");
+            commandConfig.setOnAfterTest("docker exec toxiproxy /go/bin/toxiproxy-cli toxic remove -n bsLatency balance-service");
             eventConfigs.add(commandConfig);
         }
 
