@@ -26,7 +26,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
-  "id": 8,
+  "id": 3,
   "links": [],
   "panels": [
     {
@@ -101,6 +101,7 @@
         "y": 0
       },
       "id": 106,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [
@@ -207,6 +208,7 @@
         "y": 0
       },
       "id": 108,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [
@@ -310,6 +312,7 @@
         "y": 9
       },
       "id": 110,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [
@@ -545,6 +548,6 @@
   "timezone": "browser",
   "title": "HTTP connection pool",
   "uid": "spring-boot-kubernetes-httpconpool-mimir",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }

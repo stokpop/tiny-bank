@@ -1,35 +1,4 @@
 {
-  "__inputs": [
-    {
-      "name": "DS_MIMIR",
-      "label": "Mimir",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
-  "__elements": {},
-  "__requires": [
-    {
-      "type": "grafana",
-      "id": "grafana",
-      "name": "Grafana",
-      "version": "11.4.0"
-    },
-    {
-      "type": "datasource",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": "1.0.0"
-    },
-    {
-      "type": "panel",
-      "id": "timeseries",
-      "name": "Time series",
-      "version": ""
-    }
-  ],
   "annotations": {
     "list": [
       {
@@ -74,13 +43,13 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": null,
+  "id": 12,
   "links": [],
   "panels": [
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -147,6 +116,7 @@
         "y": 0
       },
       "id": 5,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -164,7 +134,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -184,7 +154,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -251,6 +221,7 @@
         "y": 0
       },
       "id": 4,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -268,7 +239,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -288,7 +259,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -341,7 +312,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "bool_yes_no"
         },
         "overrides": []
       },
@@ -352,6 +324,7 @@
         "y": 8
       },
       "id": 1,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -369,10 +342,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
+          "editorMode": "code",
           "expr": "resilience4j_circuitbreaker_state{service=\"tiny-bank-service\", name=\"balanceService\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -389,7 +362,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -453,6 +426,7 @@
         "y": 8
       },
       "id": 2,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -470,7 +444,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -490,7 +464,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -571,7 +545,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -591,7 +565,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -655,6 +629,7 @@
         "y": 16
       },
       "id": 10,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -672,7 +647,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -692,7 +667,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -757,6 +732,7 @@
         "y": 24
       },
       "id": 6,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -774,7 +750,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
           "editorMode": "code",
@@ -794,7 +770,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -859,6 +835,7 @@
         "y": 24
       },
       "id": 7,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -876,7 +853,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
           "editorMode": "code",
@@ -896,7 +873,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -961,6 +938,7 @@
         "y": 32
       },
       "id": 8,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -978,7 +956,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -998,7 +976,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_MIMIR}"
+        "uid": "mimir"
       },
       "fieldConfig": {
         "defaults": {
@@ -1063,6 +1041,7 @@
         "y": 32
       },
       "id": 9,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -1080,7 +1059,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_MIMIR}"
+            "uid": "mimir"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -1098,19 +1077,21 @@
       "type": "timeseries"
     }
   ],
+  "preload": false,
+  "refresh": "5s",
   "schemaVersion": 40,
   "tags": [],
   "templating": {
     "list": []
   },
   "time": {
-    "from": "2025-06-18T13:10:50.275Z",
-    "to": "2025-06-18T13:13:17.445Z"
+    "from": "now-5m",
+    "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "Circuit Breaker Tiny Bank",
   "uid": "circuit-breaker-custom-1",
-  "version": 21,
+  "version": 31,
   "weekStart": ""
 }
