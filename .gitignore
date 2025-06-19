@@ -40,3 +40,4 @@ opentelemetry-javaagent.jar
 test_results.csv
 *.log
 scheduler/dependency-reduced-pom.xml
+logs/
