@@ -14,6 +14,9 @@ public class AccountService {
     private static final Logger logger = LoggerFactory.getLogger(AccountService.class);
     private static final String ACCOUNT_SERVICE = "accountService";
 
+    public static final Customer FALLBACK_USER = new Customer("Fallback User");
+    public static final Account FALLBACK_ACCOUNT = new Account(FALLBACK_USER, "FALLBACK-ACCOUNT", "Fallback Account");
+
     @Value("${remote.account.service.url}")
     private String remoteServiceUrl;
 
@@ -31,9 +34,8 @@ public class AccountService {
     }
 
     private Account getAccountFallback(String userId, Exception ex) {
-        logger.warn("Fallback for getAccount called for user: {}. Error: {}", userId, ex.getMessage());
+        logger.warn("Fallback for getAccount called for user: {}.", userId, ex);
         // Return a default account as fallback
-        Customer fallbackCustomer = new Customer("Fallback User");
-        return new Account(fallbackCustomer, "FALLBACK-ACCOUNT", "Fallback Account");
+        return FALLBACK_ACCOUNT;
     }
 }
