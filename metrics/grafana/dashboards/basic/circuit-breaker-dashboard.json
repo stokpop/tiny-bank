@@ -20,22 +20,6 @@
           "type": "tags"
         },
         "type": "dashboard"
-      },
-      {
-        "datasource": {
-          "type": "datasource",
-          "uid": "grafana"
-        },
-        "enable": true,
-        "hide": false,
-        "iconColor": "red",
-        "name": "New annotation",
-        "target": {
-          "limit": 100,
-          "matchAny": false,
-          "tags": [],
-          "type": "dashboard"
-        }
       }
     ]
   },
@@ -73,7 +57,7 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "smooth",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
@@ -90,8 +74,8 @@
             }
           },
           "mappings": [],
-          "max": 0,
-          "min": -1,
+          "max": 100,
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -105,7 +89,7 @@
               }
             ]
           },
-          "unit": "percentunit"
+          "unit": "percent"
         },
         "overrides": []
       },
@@ -141,7 +125,7 @@
           "expr": "resilience4j_circuitbreaker_failure_rate{service=\"tiny-bank-service\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "instant": true,
+          "instant": false,
           "legendFormat": "{{name}}",
           "range": true,
           "refId": "A",
@@ -178,7 +162,7 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "smooth",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
@@ -195,8 +179,8 @@
             }
           },
           "mappings": [],
-          "max": 0,
-          "min": -1,
+          "max": 100,
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -210,7 +194,7 @@
               }
             ]
           },
-          "unit": "percentunit"
+          "unit": "percent"
         },
         "overrides": []
       },
@@ -246,7 +230,7 @@
           "expr": "resilience4j_circuitbreaker_slow_call_rate{service=\"tiny-bank-service\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "instant": true,
+          "instant": false,
           "legendFormat": "{{name}}",
           "range": true,
           "refId": "A",
@@ -313,7 +297,7 @@
               }
             ]
           },
-          "unit": "bool_yes_no"
+          "unit": "bool_on_off"
         },
         "overrides": []
       },
@@ -349,7 +333,7 @@
           "expr": "resilience4j_circuitbreaker_state{service=\"tiny-bank-service\", name=\"balanceService\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "instant": true,
+          "instant": false,
           "legendFormat": "{{state}}",
           "range": true,
           "refId": "A",
@@ -378,7 +362,7 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "bars",
-            "fillOpacity": 100,
+            "fillOpacity": 82,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -386,9 +370,9 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
+            "lineInterpolation": "smooth",
+            "lineWidth": 10,
+            "pointSize": 3,
             "scaleDistribution": {
               "type": "linear"
             },
@@ -415,7 +399,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "bool_on_off"
         },
         "overrides": []
       },
@@ -451,7 +436,7 @@
           "expr": "resilience4j_circuitbreaker_state{service=\"tiny-bank-service\", name=\"accountService\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "instant": true,
+          "instant": false,
           "legendFormat": "{{state}}",
           "range": true,
           "refId": "A",
@@ -480,7 +465,7 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 0,
+            "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -488,7 +473,7 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "smooth",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
@@ -528,6 +513,7 @@
         "y": 16
       },
       "id": 3,
+      "interval": "1s",
       "options": {
         "legend": {
           "calcs": [],
@@ -549,10 +535,11 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
+          "exemplar": false,
           "expr": "resilience4j_circuitbreaker_slow_calls{name=\"balanceService\", service=\"tiny-bank-service\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "instant": true,
+          "instant": false,
           "legendFormat": "{{kind}}",
           "range": true,
           "refId": "A",
@@ -581,7 +568,7 @@
             "barAlignment": 0,
             "barWidthFactor": 0.6,
             "drawStyle": "line",
-            "fillOpacity": 0,
+            "fillOpacity": 18,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -589,7 +576,7 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "smooth",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
@@ -654,7 +641,7 @@
           "expr": "resilience4j_circuitbreaker_slow_calls{name=\"accountService\", service=\"tiny-bank-service\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "instant": true,
+          "instant": false,
           "legendFormat": "{{kind}}",
           "range": true,
           "refId": "A",
@@ -754,10 +741,11 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
+          "exemplar": false,
           "expr": "sum(rate(resilience4j_circuitbreaker_calls_seconds_count{name=\"balanceService\"}[$__rate_interval])) by (kind)",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "instant": true,
+          "instant": false,
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -857,10 +845,11 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
+          "exemplar": false,
           "expr": "sum(rate(resilience4j_circuitbreaker_calls_seconds_count{name=\"accountService\"}[$__rate_interval])) by (kind)",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "instant": true,
+          "instant": false,
           "legendFormat": "__auto",
           "range": true,
           "refId": "A",
@@ -1078,9 +1067,13 @@
     }
   ],
   "preload": false,
-  "refresh": "5s",
   "schemaVersion": 40,
-  "tags": [],
+  "tags": [
+    "circuit-breaker",
+    "resilience4j",
+    "perfana",
+    "perfana-template"
+  ],
   "templating": {
     "list": []
   },
@@ -1092,6 +1085,6 @@
   "timezone": "browser",
   "title": "Circuit Breaker Tiny Bank",
   "uid": "circuit-breaker-custom-1",
-  "version": 31,
+  "version": 48,
   "weekStart": ""
 }

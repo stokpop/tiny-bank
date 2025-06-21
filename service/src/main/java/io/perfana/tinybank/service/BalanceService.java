@@ -25,7 +25,8 @@ public class BalanceService {
         this.restTemplate = restTemplate;
     }
 
-    @CircuitBreaker(name = BALANCE_SERVICE, fallbackMethod = "getBalanceFallback")
+    //@CircuitBreaker(name = BALANCE_SERVICE, fallbackMethod = "getBalanceFallback")
+    @CircuitBreaker(name = BALANCE_SERVICE)
     public Balance getBalance(String accountNumber) {
         logger.info("Calling balance service for account: {}", accountNumber);
         if (Objects.equals(accountNumber, AccountService.FALLBACK_ACCOUNT.accountNumber())) {

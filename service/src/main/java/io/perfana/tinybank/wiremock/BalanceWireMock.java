@@ -10,7 +10,8 @@ public class BalanceWireMock {
                 .port(30124)
                 .disableRequestJournal()
                 .asynchronousResponseEnabled(true)
-                .asynchronousResponseThreads(256);
+                .asynchronousResponseThreads(256)
+                .extensions(new GlobalParameterTransformer(), new FailureRateTransformer());
 
         WireMockServer wireMockServer = new WireMockServer(options);
         wireMockServer.start();
@@ -20,17 +21,31 @@ public class BalanceWireMock {
         WireMock.stubFor(WireMock.get(WireMock.urlEqualTo("/balance?accountNumber=LT121000011234567890"))
                 .willReturn(WireMock.aResponse()
                         .withHeader("Content-Type", "application/json")
-                        .withBody("{ \"amount\": 1000, \"currency\": \"EUR\" }")));
+                        .withBody("{ \"amount\": 1000, \"currency\": \"EUR\" }")
+                        .withTransformers("global-parameter-transformer"))
+        );
 
         WireMock.stubFor(WireMock.get(WireMock.urlEqualTo("/balance?accountNumber=NL91ABNA0417164300"))
                 .willReturn(WireMock.aResponse()
                         .withHeader("Content-Type", "application/json")
-                        .withBody("{ \"amount\": -200, \"currency\": \"EUR\" }")));
+                        .withBody("{ \"amount\": -200, \"currency\": \"EUR\" }")
+                        .withTransformers("global-parameter-transformer"))
+        );
 
         WireMock.stubFor(WireMock.get(WireMock.urlEqualTo("/balance?accountNumber=US12BOFA0000123456"))
                 .willReturn(WireMock.aResponse()
                         .withHeader("Content-Type", "application/json")
-                        .withBody("{ \"amount\": 89000, \"currency\": \"USD\" }")));
+                        .withBody("{ \"amount\": 89000, \"currency\": \"USD\" }")
+                        .withTransformers("global-parameter-transformer"))
+        );
+
+        // admin stubs
+
+        WireMock.stubFor(WireMock.post(WireMock.urlPathMatching("/admin/set-failure-rate"))
+                .willReturn(WireMock.aResponse()
+                        .withStatus(200)
+                        .withTransformers("set-failure-rate-transformer")
+                ));
 
         System.out.println("WireMock server started at http://localhost:30124");
     }

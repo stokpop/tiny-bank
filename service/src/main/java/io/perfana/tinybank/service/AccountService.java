@@ -26,7 +26,8 @@ public class AccountService {
         this.restTemplate = restTemplate;
     }
 
-    @CircuitBreaker(name = ACCOUNT_SERVICE, fallbackMethod = "getAccountFallback")
+    //@CircuitBreaker(name = ACCOUNT_SERVICE, fallbackMethod = "getAccountFallback")
+    @CircuitBreaker(name = ACCOUNT_SERVICE)
     public Account getAccount(String userId) {
         logger.info("Calling account service for user: {}", userId);
         String url = String.format("%s/account?userId=%s", remoteServiceUrl, userId);

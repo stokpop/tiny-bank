@@ -16,7 +16,7 @@ export const options = {
     scenarios: {
         account_info_test: {
             executor: 'constant-arrival-rate',
-            rate: 6,  // Number of iterations to start per time unit
+            rate: 1,  // Number of iterations to start per time unit
             timeUnit: '1s',
             duration: duration,  // Total duration of the test
             preAllocatedVUs: 100,  // Pre-allocate virtual users
@@ -25,7 +25,7 @@ export const options = {
         },
         transactions_test: {
             executor: 'constant-arrival-rate',
-            rate: 12,
+            rate: 1,
             timeUnit: '1s',
             duration: duration,
             preAllocatedVUs: 100,
@@ -73,13 +73,13 @@ export function accountInfoTest() {
     check(response, {
         'is status 200': (r) => r.status === 200,
         'duration < 400ms': (r) => r.timings.duration < 400,
-        'no fallback balance': (r) => {
-            // Check if balance is available and not the fallback (0, "Not Available")
-            return body.balance && !(body.balance.amount === 0 && body.balance.currency === "Not Available");
+        'fallback account': (r) => {
+            // Check if account is a fallback account (contains "FALLBACK" in accountNumber)
+            return body.account && body.account.accountNumber.includes("FALLBACK");
         },
-        'no fallback account': (r) => {
-            // Check if account is not a fallback account (doesn't contain "FALLBACK" in accountNumber)
-            return body.account && !body.account.accountNumber.includes("FALLBACK");
+        'fallback balance': (r) => {
+            // Check if balance is available and is fallback (0, "Not Available")
+            return body.balance && (body.balance.amount === 0 && body.balance.currency === "Not Available");
         }
     });
 }
@@ -104,7 +104,7 @@ export function transactionTest() {
     // Check the response status
     check(response, {
         'is status 200': (r) => r.status === 200,
-        'duration < 400ms': (r) => r.timings.duration < 400,
+        'duration < 400ms': (r) => r.timings.duration < 400
     });
 }
 
