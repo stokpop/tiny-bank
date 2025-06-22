@@ -2,6 +2,7 @@ package io.perfana.tinybank.wiremock;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
+import com.github.tomakehurst.wiremock.core.Options;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 
@@ -14,7 +15,8 @@ public class AccountWireMock {
                 .disableRequestJournal()
                 .asynchronousResponseEnabled(true)
                 .asynchronousResponseThreads(256)
-                .extensions(new ExampleTransformer(), new GlobalParameterTransformer(), new FailureRateTransformer());
+                .useChunkedTransferEncoding(Options.ChunkedEncodingPolicy.BODY_FILE)
+                .extensions(new InjectFailuresTransformer(), new SetFailureRateTransformer());
 
         WireMockServer wireMockServer = new WireMockServer(options);
         wireMockServer.start();
@@ -28,7 +30,8 @@ public class AccountWireMock {
                         .withHeader("Content-Type", "application/json")
                         .withStatus(200)
                         .withBody("{ \"customer\": { \"name\": \"John Doe\" }, \"accountNumber\": \"LT121000011234567890\", \"name\": \"John's Tiny Payments Account\"}")
-                        .withTransformers("global-parameter-transformer"))
+                        .withTransformers("inject-failures-transformer")
+                )
         );
 
         WireMock.stubFor(WireMock.get(WireMock.urlEqualTo("/account?userId=u1234"))
@@ -38,21 +41,24 @@ public class AccountWireMock {
                         .withHeader("Content-Type", "application/json")
                         .withStatus(200)
                         .withBody("{ \"customer\": { \"name\": \"John Doe\" }, \"accountNumber\": \"LT121000011234567890\", \"name\": \"John's Tiny Payments Account\"}")
-                        .withTransformers("example-transformer", "global-parameter-transformer"))
+                        .withTransformers("inject-failures-transformer")
+                )
         );
 
         WireMock.stubFor(WireMock.get(WireMock.urlEqualTo("/account?userId=u5678"))
                 .willReturn(WireMock.aResponse()
                         .withHeader("Content-Type", "application/json")
                         .withBody("{ \"customer\": { \"name\":  \"Mary Jane\" },  \"accountNumber\": \"NL91ABNA0417164300\", \"name\": \"Mary's Tiny Savings Account\" }")
-                        .withTransformers("global-parameter-transformer"))
+                        .withTransformers("inject-failures-transformer")
+                )
         );
 
         WireMock.stubFor(WireMock.get(WireMock.urlEqualTo("/account?userId=u9012"))
                 .willReturn(WireMock.aResponse()
                         .withHeader("Content-Type", "application/json")
                         .withBody("{ \"customer\": { \"name\":  \"Alice Coop\" },  \"accountNumber\": \"US12BOFA0000123456\", \"name\": \"Alice's Tiny Payments Account\" }")
-                        .withTransformers("global-parameter-transformer"))
+                        .withTransformers("inject-failures-transformer")
+                )
         );
 
         // below are the admin stubs
@@ -75,30 +81,13 @@ public class AccountWireMock {
                         .withBody("{\"status\": \"success\", \"message\": \"Deactivated account failures, returning to normal operation\"}")
                 ));
 
-
         WireMock.stubFor(WireMock.post(WireMock.urlPathMatching("/admin/set-failure-rate"))
                 .willReturn(WireMock.aResponse()
                         .withStatus(200)
-                        .withTransformers("set-failure-rate-transformer")
+                        .withTransformers("set-failure-rate-transformer") // this set the rate in InjectFailuresTransformer
                 ));
 
-
-
         System.out.println("WireMock server started at http://localhost:30123");
-
-        System.out.println("\nAvailable Endpoints:");
-        System.out.println("1. GET /account?userId=u1234");
-        System.out.println("   - Returns John Doe's account information");
-        System.out.println("   - Can be configured for 20% failure rate when failures are activated");
-        System.out.println("\n2. GET /account?userId=u5678");
-        System.out.println("   - Returns Mary Jane's account information");
-        System.out.println("\n3. GET /account?userId=u9012");
-        System.out.println("   - Returns Alice Coop's account information");
-        System.out.println("\nAdmin Endpoints:");
-        System.out.println("4. POST /admin/activate-failures");
-        System.out.println("   - Activates 20% failure rate for user u1234");
-        System.out.println("5. POST /admin/deactivate-failures");
-        System.out.println("   - Deactivates failures and returns to normal operation");
 
     }
 

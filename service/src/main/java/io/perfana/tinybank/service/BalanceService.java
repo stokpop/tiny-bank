@@ -28,12 +28,15 @@ public class BalanceService {
     //@CircuitBreaker(name = BALANCE_SERVICE, fallbackMethod = "getBalanceFallback")
     @CircuitBreaker(name = BALANCE_SERVICE)
     public Balance getBalance(String accountNumber) {
+        long startTimeMillis = System.currentTimeMillis();
         logger.info("Calling balance service for account: {}", accountNumber);
         if (Objects.equals(accountNumber, AccountService.FALLBACK_ACCOUNT.accountNumber())) {
             return BALANCE_UNAVAILABLE;
         }
         String url = String.format("%s/balance?accountNumber=%s", remoteServiceUrl, accountNumber);
-        return restTemplate.getForObject(url, Balance.class);
+        Balance balance = restTemplate.getForObject(url, Balance.class);
+        logger.info("Called balance service for account: {} balance: {} duration: {}ms", accountNumber, balance, System.currentTimeMillis() - startTimeMillis);
+        return balance;
     }
 
     private Balance getBalanceFallback(String accountNumber, Exception ex) {

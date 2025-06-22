@@ -19,10 +19,10 @@ public class CustomResponseErrorHandler implements ResponseErrorHandler {
     @Override
     public void handleError(ClientHttpResponse response) throws IOException {
         if (response.getStatusCode().is4xxClientError()) {
-            log.warn("400: {}", response.getStatusText());
+            log.warn("Handle error 400: {}", response.getStatusText());
             throw new ClientErrorException(response.getStatusCode(), response.getStatusText());
         } else if (response.getStatusCode().is5xxServerError()) {
-            log.warn("500: {}", response.getStatusText());
+            log.warn("Handle error 500: {}", response.getStatusText());
             throw new ServerErrorException(response.getStatusCode(), response.getStatusText());
         }
     }

@@ -19,6 +19,6 @@ public class RestExceptionHandler extends ResponseEntityExceptionHandler {
         logger.error("Error handling request ({}): {}", errorId, ex.getMessage());
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new ApiError("Sorry, we are experiencing technical difficulties. Please try again later.",errorId));
+                .body(new ApiError("Sorry, we are experiencing technical difficulties. Please try again later.", errorId));
     }
 }

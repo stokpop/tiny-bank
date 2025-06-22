@@ -14,10 +14,10 @@ public class ExampleTransformer extends ResponseTransformer {
 
     @Override
     public Response transform(Request request, Response response, FileSource files, Parameters parameters) {
-        // Get failure percentage from parameters or use default 10%
+        // Get failure percentage from parameters or use default 0%
         int failurePercentage = parameters.containsKey("failurePercentage")
                 ? parameters.getInt("failurePercentage")
-                : 10;
+                : 0;
 
         // Randomly determine if this should be a failure response
         boolean shouldFail = random.nextInt(100) < failurePercentage;

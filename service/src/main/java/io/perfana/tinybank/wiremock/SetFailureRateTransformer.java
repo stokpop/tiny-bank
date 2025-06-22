@@ -7,7 +7,10 @@ import com.github.tomakehurst.wiremock.stubbing.ServeEvent;
 
 import java.util.Map;
 
-public class FailureRateTransformer implements ResponseTransformerV2 {
+/**
+ * Helper transformer to set the failure rate with remote calls to the stub.
+ */
+public class SetFailureRateTransformer implements ResponseTransformerV2 {
 
     public static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -15,13 +18,13 @@ public class FailureRateTransformer implements ResponseTransformerV2 {
     public Response transform(Response response, ServeEvent serveEvent) {
         try {
             String body =serveEvent.getRequest().getBodyAsString();
-
             System.out.println("Received request to set failure rate: " + body);
+
             Map<String, Object> params = OBJECT_MAPPER.readValue(body, Map.class);
 
             if (params.containsKey("rate")) {
                 int rate = Integer.parseInt(params.get("rate").toString());
-                GlobalParameterTransformer.setGlobalParameter("failureRate", rate);
+                InjectFailuresTransformer.setFailureRate(rate);
                 return Response.response()
                         .status(200)
                         .body("{\"status\": \"success\", \"message\": \"Failure rate set to " + rate + "%\"}")

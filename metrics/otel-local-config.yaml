@@ -27,6 +27,9 @@ processors:
         #value: "tiny-bank-service"
         #from_attribute: service
   batch:
+    timeout: 100ms
+    send_batch_size: 10
+
 extensions:
   zpages: {}
 exporters:
@@ -34,6 +37,11 @@ exporters:
     verbosity: detailed
   prometheusremotewrite:
       endpoint: "http://prometheus:9090/api/v1/write"
+  otlp:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
 service:
   telemetry:
     logs:
@@ -50,7 +58,7 @@ service:
 #      receivers: [otlp]
 #      processors: []
 #      exporters: [debug]
-#    traces:
-#      receivers: [otlp, zipkin]
-#      processors: []
-#      exporters: [debug]
+    traces:
+      receivers: [otlp, zipkin]
+      processors: [attributes]
+      exporters: [otlp]

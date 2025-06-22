@@ -29,9 +29,12 @@ public class AccountService {
     //@CircuitBreaker(name = ACCOUNT_SERVICE, fallbackMethod = "getAccountFallback")
     @CircuitBreaker(name = ACCOUNT_SERVICE)
     public Account getAccount(String userId) {
-        logger.info("Calling account service for user: {}", userId);
+        long startTimeMillis = System.currentTimeMillis();
         String url = String.format("%s/account?userId=%s", remoteServiceUrl, userId);
-        return restTemplate.getForObject(url, Account.class);
+        Account account = restTemplate.getForObject(url, Account.class);
+        logger.info("Called account service for user: {} account: {} duration: {}ms", userId, account, System.currentTimeMillis() - startTimeMillis);
+        return account;
+
     }
 
     private Account getAccountFallback(String userId, Exception ex) {
