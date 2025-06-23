@@ -12,7 +12,7 @@ public class BalanceWireMock {
                 .disableRequestJournal()
                 .asynchronousResponseEnabled(true)
                 .asynchronousResponseThreads(256)
-                .useChunkedTransferEncoding(Options.ChunkedEncodingPolicy.BODY_FILE)
+                .useChunkedTransferEncoding(Options.ChunkedEncodingPolicy.BODY_FILE) // disable chunking for short responses
                 .extensions(new InjectFailuresTransformer(), new SetFailureRateTransformer());
 
         WireMockServer wireMockServer = new WireMockServer(options);

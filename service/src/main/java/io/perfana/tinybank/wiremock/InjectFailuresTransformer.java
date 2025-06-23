@@ -37,9 +37,9 @@ public class InjectFailuresTransformer implements ResponseTransformerV2 {
         // Apply the failure rate logic
         if (failureRate > 0 && RANDOM.nextInt(100) < failureRate) {
             return Response.response()
-                    .status(503)
+                    .status(500)
                     .headers(response.getHeaders())
-                    .body("{\"error\": \"Service Unavailable\", \"message\": \"Random failure generated\"}")
+                    .body("{\"error\": \"Service Error\", \"message\": \"Random failure generated\"}")
                     .build();
         }
 

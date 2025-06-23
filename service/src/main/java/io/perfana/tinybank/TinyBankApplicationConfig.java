@@ -34,6 +34,9 @@ public class TinyBankApplicationConfig {
                 .setDefaultRequestConfig(requestConfig)
                 .setConnectionManager(connectionManager)
                 .addExecInterceptorLast("micrometer", new ObservationExecChainHandler(observationRegistry))
+                // automatic retries will cause 1 second delay for 503 and 429,
+                // but not if response timeout is lower than 1 second
+                .disableAutomaticRetries()
                 .build();
     }
 
