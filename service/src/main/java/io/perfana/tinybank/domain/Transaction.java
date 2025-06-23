@@ -10,7 +10,8 @@ import java.util.Objects;
 public class Transaction {
 
         @Id
-        @GeneratedValue(strategy = GenerationType.IDENTITY)
+        // generated id will break loading data wit explicit transactionId set
+        //@GeneratedValue(strategy = GenerationType.IDENTITY)
         private Long transactionId;
         private String fromAccount;
         private String toAccount;
