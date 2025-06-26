@@ -110,7 +110,7 @@ export function transactionTest() {
 
 export function healthCheck() {
     let params = {
-        timeout: '5s',
+        timeout: '60s',
         headers: {
             'perfana-test-run-id': `${testRunId}`,
             'perfana-request-name': 'healthCheck'
@@ -119,8 +119,12 @@ export function healthCheck() {
             name: 'healthCheck',
         }
     }
-    const healthCheckRes = http.get(`http://localhost:${port}/actuator/health`, params);
-    check(healthCheckRes, {
-        'health check status is 200': (r) => r.status === 200,
+    const healthCheckLivenessRes = http.get(`http://localhost:${port}/actuator/health/liveness`, params);
+    check(healthCheckLivenessRes, {
+        'health check liveness status is 200': (r) => r.status === 200,
+    });
+    const healthCheckReadinessRes = http.get(`http://localhost:${port}/actuator/health/readiness`, params);
+    check(healthCheckReadinessRes, {
+        'health check readiness status is 200': (r) => r.status === 200,
     });
 }

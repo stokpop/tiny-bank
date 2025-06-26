@@ -28,7 +28,7 @@ public class TestScheduler {
         //EventLogger eventLogger = EventLoggerStdOut.INSTANCE_DEBUG;
 
         final int rampupTimeInSeconds = 10;
-        final int constantLoadTimeInSeconds = 120;
+        final int constantLoadTimeInSeconds = 240;
         final int totalRunTimeInSeconds = rampupTimeInSeconds + constantLoadTimeInSeconds;
         final int totalSleepSecondsPlusSlack = totalRunTimeInSeconds + 10;
 
@@ -123,24 +123,43 @@ public class TestScheduler {
             eventConfigs.add(wiremockBalance);
         }
 
-//        String scheduleScriptSlowRemoteServices =
-//                """
-//                    PT2S|wiremock-change-mappings(no-0ms)|delay_account=0;delay_balance=0
-//                    PT30S|wiremock-change-mappings(short-100ms)|delay_account=100;delay_balance=100
-//                    PT60S|wiremock-change-mappings(slow-500ms)|delay_account=500;delay_balance=500
-//                    PT120S|wiremock-change-mappings(balance-really-slow-1s)|delay_account=500;delay_balance=1000
-//                    PT180S|wiremock-change-mappings(balance-really-slow-2s)|delay_account=500;delay_balance=2000
-//                    PT220S|wiremock-change-mappings(short-delay-100ms)|delay_account=100;delay_balance=100
-//                """;
+        String scheduleScriptSlowRemoteServices =
+                """
+                    PT2S|wiremock-change-mappings(no-0ms)|delay_account=0;delay_balance=0
+                    PT30S|wiremock-change-mappings(short-100ms)|delay_account=100;delay_balance=100
+                    PT60S|wiremock-change-mappings(slow-500ms)|delay_account=500;delay_balance=500
+                    PT120S|wiremock-change-mappings(balance-really-slow-1s)|delay_account=500;delay_balance=1000
+                    PT180S|wiremock-change-mappings(balance-really-slow-2s)|delay_account=500;delay_balance=2000
+                    PT220S|wiremock-change-mappings(short-delay-100ms)|delay_account=100;delay_balance=100
+                """;
 
         String scheduleScriptSlowDatabase =
                 """
                     PT30S|run-command(short-db-200ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=200
-                    PT90S|run-command(slow-db-500ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=500
-                    PT180S|run-command(slow-db-800ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=800
-                    PT220S|run-command(slow-db-1400ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=1400
-                    PT240S|run-command(slow-db-2000ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=2000
-                    PT280S|run-command(fast-db-10ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=10
+                    PT30S|run-command(short-db-200ms)|name=alerts;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=200
+                    
+                    PT60S|run-command(slow-db-800ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=800
+                    PT60S|run-command(slow-db-800ms)|name=alerts;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=800
+                               
+                    PT90S|run-command(toxiproxy-db-drop-connection-add)|name=toxiproxy-db-drop-connection-add;proxy_name=test-postgres
+                    PT90S|run-command(toxiproxy-db-drop-connection-add)|name=alerts-text;text=toxiproxy-db-drop-connection-add
+                    PT120S|run-command(toxiproxy-db-drop-connection-remove)|name=toxiproxy-db-drop-connection-remove;proxy_name=test-postgres
+                    PT120S|run-command(toxiproxy-db-drop-connection-remove)|name=alerts-text;text=toxiproxy-db-drop-connection-remove
+
+                    PT124S|run-command(slow-db-100ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=100
+                    PT124S|run-command(slow-db-100ms)|name=alerts;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=100
+
+                    PT160S|run-command(slow-db-500ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=500
+                    PT160S|run-command(slow-db-500ms)|name=alerts;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=500
+                    
+                    PT220S|run-command(slow-db-3400ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=3400
+                    PT220S|run-command(slow-db-3400ms)|name=alerts;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=3400
+                    
+                    PT240S|run-command(slow-db-10000ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=10000
+                    PT240S|run-command(slow-db-10000ms)|name=alerts;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=10000
+                    
+                    PT280S|run-command(fast-db-100ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=100
+                    PT280S|run-command(fast-db-100ms)|name=alerts;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=100
                 """;
 
 //        // TODO duplicated so also alerts is receiving events: missing - multiple listeners for events? now based on name
@@ -161,30 +180,52 @@ public class TestScheduler {
 //                        """;
 
         // TODO duplicated so also alerts is receiving events: missing - multiple listeners for events? now based on name
-        String scheduleScriptSlowBalance =
-                """
-                    PT20S|run-command(short-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
-                    PT20S|run-command(short-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
-                    PT40S|run-command(slow-balance-1200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
-                    PT40S|run-command(slow-balance-1200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
-                    PT60S|run-command(slow-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
-                    PT60S|run-command(slow-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
-                    PT80S|run-command(slow-balance-1200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
-                    PT80S|run-command(slow-balance-1200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
-                    PT110S|run-command(slow-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
-                    PT110S|run-command(slow-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
-                    PT130S|run-command(fast-balance-10ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
-                    PT130S|run-command(fast-balance-10ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
-                        """;
+//        String scheduleScriptSlowBalance =
+//                """
+//                    PT20S|run-command(short-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+//                    PT20S|run-command(short-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+//                    PT40S|run-command(slow-balance-1200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
+//                    PT40S|run-command(slow-balance-1200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
+//                    PT60S|run-command(slow-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+//                    PT60S|run-command(slow-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+//                    PT80S|run-command(slow-balance-1200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
+//                    PT80S|run-command(slow-balance-1200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=1200
+//                    PT110S|run-command(slow-balance-200ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+//                    PT110S|run-command(slow-balance-200ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=200
+//                    PT130S|run-command(fast-balance-10ms)|name=toxiproxy;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
+//                    PT130S|run-command(fast-balance-10ms)|name=alerts;proxy_name=balance-service;toxic_name=bsLatency;latency_ms=10
+//                        """;
 
         {
             CommandRunnerEventConfig commandConfig = new CommandRunnerEventConfig();
             commandConfig.setName("toxiproxy");
             // TODO: make vars available to on start test?
             //commandConfig.setOnStartTest("toxiproxy-cli --host localhost:8474 toxic add -n __toxic_name__ -t latency -a latency=0 __proxy_name__");
-            commandConfig.setOnStartTest("toxiproxy-cli --host localhost:8474 toxic add -n bsLatency -t latency -a latency=0 balance-service");
+            //commandConfig.setOnStartTest("toxiproxy-cli --host localhost:8474 toxic add -n bsLatency -t latency -a latency=0 balance-service");
+            commandConfig.setOnStartTest("toxiproxy-cli --host localhost:8474 toxic add -n pgLatency -t latency -a latency=0 test-postgres");
             commandConfig.setOnScheduledEvent("toxiproxy-cli --host localhost:8474 toxic update -n __toxic_name__ -a latency=__latency_ms__ __proxy_name__");
-            commandConfig.setOnAfterTest("toxiproxy-cli --host localhost:8474 toxic remove -n bsLatency balance-service");
+            //commandConfig.setOnAfterTest("toxiproxy-cli --host localhost:8474 toxic remove -n bsLatency balance-service");
+            commandConfig.setOnAfterTest("toxiproxy-cli --host localhost:8474 toxic remove -n pgLatency test-postgres");
+            eventConfigs.add(commandConfig);
+        }
+
+        {
+            CommandRunnerEventConfig commandConfig = new CommandRunnerEventConfig();
+            commandConfig.setName("alerts-text");
+            commandConfig.setOnScheduledEvent("curl -Ss -H \"Content-Type: application/json\" -X POST -d '{\"tags\":[\"resilience\"],\"text\":\"__text__\"}' http://admin:admin@localhost:3000/api/annotations");
+            eventConfigs.add(commandConfig);
+        }
+
+        {
+            CommandRunnerEventConfig commandConfig = new CommandRunnerEventConfig();
+            commandConfig.setName("toxiproxy-db-drop-connection-add");
+            commandConfig.setOnScheduledEvent("toxiproxy-cli --host localhost:8474 toxic add -n reset-peer-toxic -t reset_peer -a timeout=300 __proxy_name__");
+            eventConfigs.add(commandConfig);
+        }
+        {
+            CommandRunnerEventConfig commandConfig = new CommandRunnerEventConfig();
+            commandConfig.setName("toxiproxy-db-drop-connection-remove");
+            commandConfig.setOnScheduledEvent("toxiproxy-cli --host localhost:8474 toxic remove -n reset-peer-toxic __proxy_name__");
             eventConfigs.add(commandConfig);
         }
 
@@ -208,7 +249,7 @@ public class TestScheduler {
         EventSchedulerConfig eventSchedulerConfig = EventSchedulerConfig.builder()
                 .testConfig(testConfig)
                 .eventConfigs(eventConfigs)
-                .scheduleScript(isSlowDatabaseActive ? scheduleScriptSlowDatabase : scheduleScriptSlowBalance)
+                .scheduleScript(isSlowDatabaseActive ? scheduleScriptSlowDatabase : scheduleScriptSlowRemoteServices)
                 .build();
 
         EventScheduler scheduler = EventSchedulerBuilder.of(eventSchedulerConfig, eventLogger);
