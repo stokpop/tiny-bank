@@ -181,10 +181,10 @@ public class TestScheduler {
             CommandRunnerEventConfig commandConfig = new CommandRunnerEventConfig();
             commandConfig.setName("toxiproxy");
             // TODO: make vars available to on start test?
-            //commandConfig.setOnStartTest("docker exec toxiproxy /go/bin/toxiproxy-cli toxic add -n __toxic_name__ -t latency -a latency=0 __proxy_name__");
-            commandConfig.setOnStartTest("docker exec toxiproxy /go/bin/toxiproxy-cli toxic add -n bsLatency -t latency -a latency=0 balance-service");
-            commandConfig.setOnScheduledEvent("docker exec toxiproxy /go/bin/toxiproxy-cli toxic update -n __toxic_name__ -a latency=__latency_ms__ __proxy_name__");
-            commandConfig.setOnAfterTest("docker exec toxiproxy /go/bin/toxiproxy-cli toxic remove -n bsLatency balance-service");
+            //commandConfig.setOnStartTest("toxiproxy-cli --host localhost:8474 toxic add -n __toxic_name__ -t latency -a latency=0 __proxy_name__");
+            commandConfig.setOnStartTest("toxiproxy-cli --host localhost:8474 toxic add -n bsLatency -t latency -a latency=0 balance-service");
+            commandConfig.setOnScheduledEvent("toxiproxy-cli --host localhost:8474 toxic update -n __toxic_name__ -a latency=__latency_ms__ __proxy_name__");
+            commandConfig.setOnAfterTest("toxiproxy-cli --host localhost:8474 toxic remove -n bsLatency balance-service");
             eventConfigs.add(commandConfig);
         }
 

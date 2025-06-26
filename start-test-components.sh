@@ -77,9 +77,9 @@ docker compose up -d || { echo "Error: Failed to start database using Docker Com
 cd - > $OUT 2>$ERR
 
 echo "Init toxiproxy"
-docker exec toxiproxy /go/bin/toxiproxy-cli create -l 0.0.0.0:15432 -u postgres-tiny-bank:5432 test-postgres || { echo "Error: Failed to create postgres proxy"; exit 1; }
-docker exec toxiproxy /go/bin/toxiproxy-cli create -l 0.0.0.0:20123 -u host.docker.internal:30123 account-service || { echo "Error: Failed to create account service proxy"; exit 1; }
-docker exec toxiproxy /go/bin/toxiproxy-cli create -l 0.0.0.0:20124 -u host.docker.internal:30124 balance-service || { echo "Error: Failed to create balance service proxy"; exit 1; }
+toxiproxy-cli -host localhost:8474 create -l 0.0.0.0:15432 -u postgres-tiny-bank:5432 test-postgres || { echo "Error: Failed to create postgres proxy"; exit 1; }
+toxiproxy-cli -host localhost:8474 create -l 0.0.0.0:20123 -u host.docker.internal:30123 account-service || { echo "Error: Failed to create account service proxy"; exit 1; }
+toxiproxy-cli -host localhost:8474 create -l 0.0.0.0:20124 -u host.docker.internal:30124 balance-service || { echo "Error: Failed to create balance service proxy"; exit 1; }
 
 echo "Waiting for database to start"
 sleep 3

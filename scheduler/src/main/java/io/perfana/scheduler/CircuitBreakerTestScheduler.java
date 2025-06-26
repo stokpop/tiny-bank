@@ -204,11 +204,11 @@ PT130S|run-command(annotate-phase7)|name=alerts;text=Phase 7: Failure rate 10 pr
             CommandRunnerEventConfig commandConfig = new CommandRunnerEventConfig();
             commandConfig.setName("toxiproxy");
             // Setup both balance and account service latency toxics
-            commandConfig.setOnStartTest("docker exec toxiproxy /go/bin/toxiproxy-cli toxic add -n bsLatency -t latency -a latency=0 balance-service && " +
-                                        "docker exec toxiproxy /go/bin/toxiproxy-cli toxic add -n asLatency -t latency -a latency=0 account-service");
-            commandConfig.setOnScheduledEvent("docker exec toxiproxy /go/bin/toxiproxy-cli toxic update -n __toxic_name__ -a latency=__latency_ms__ __proxy_name__");
-            commandConfig.setOnAfterTest("docker exec toxiproxy /go/bin/toxiproxy-cli toxic remove -n bsLatency balance-service && " +
-                                         "docker exec toxiproxy /go/bin/toxiproxy-cli toxic remove -n asLatency account-service");
+            commandConfig.setOnStartTest("toxiproxy-cli --host localhost:8474 toxic add -n bsLatency -t latency -a latency=0 balance-service && " +
+                                        "toxiproxy-cli --host localhost:8474 toxic add -n asLatency -t latency -a latency=0 account-service");
+            commandConfig.setOnScheduledEvent("toxiproxy-cli --host localhost:8474 toxic update -n __toxic_name__ -a latency=__latency_ms__ __proxy_name__");
+            commandConfig.setOnAfterTest("toxiproxy-cli --host localhost:8474 toxic remove -n bsLatency balance-service && " +
+                                         "toxiproxy-cli --host localhost:8474 toxic remove -n asLatency account-service");
             eventConfigs.add(commandConfig);
         }
 

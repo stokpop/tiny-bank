@@ -10,7 +10,7 @@ These will enable the agents in the Tiny Bank Service JVM application.
 
 To run a load test, simply start via the `start-test.sh` script. After running the test all components are stopped.
 
-When you start the test, you will see the options you can choose from. There are two types of resiliencs tests:
+When you start the test, you will see the options you can choose from. There are two types of resilience tests:
 one with wiremock to delay the remote stubs (to fetch account info and the balance), and the other with Toxiproxy to 
 delay the database.
 
@@ -27,6 +27,12 @@ To run a resilience test with ToxiProxy to slow down the database, use the follo
 ```shell
 export IS_SLOW_DB_TEST=true
 ./start-test.sh
+```
+
+Make sure that `toxyproxy-cli` command is available. Install via the following or similar command:
+
+```shell
+brew install toxiproxy
 ```
 
 If you want to change the setting to default do unset on the env variable, like so: `unset IS_SLOW_DB_TEST`.
@@ -197,10 +203,6 @@ With added circuit breakers, check settings:
 ```shell
 curl -Ss localhost:18080/actuator/circuitbreakers | jq
 ```
-
-Wire the load to the wiremocks via toxiproxy:
-
-
 
 ## Credits
 
