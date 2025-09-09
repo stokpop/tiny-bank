@@ -6,7 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClient;
 import io.perfana.tinybank.domain.Account;
 
 @Service
@@ -20,10 +20,10 @@ public class AccountService {
     @Value("${remote.account.service.url}")
     private String remoteServiceUrl;
 
-    private final RestTemplate restTemplate;
+    private final RestClient restClient;
 
-    public AccountService(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
+    public AccountService(RestClient restTemplate) {
+        this.restClient = restTemplate;
     }
 
     //@CircuitBreaker(name = ACCOUNT_SERVICE, fallbackMethod = "getAccountFallback")
@@ -31,7 +31,7 @@ public class AccountService {
     public Account getAccount(String userId) {
         long startTimeMillis = System.currentTimeMillis();
         String url = String.format("%s/account?userId=%s", remoteServiceUrl, userId);
-        Account account = restTemplate.getForObject(url, Account.class);
+        Account account = restClient.get().uri(url).retrieve().body(Account.class);
         logger.info("Called account service for user: {} account: {} duration: {}ms", userId, account, System.currentTimeMillis() - startTimeMillis);
         return account;
 

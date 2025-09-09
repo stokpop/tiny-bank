@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.Objects;
@@ -19,10 +20,10 @@ public class BalanceService {
     @Value("${remote.balance.service.url}")
     private String remoteServiceUrl;
 
-    private final RestTemplate restTemplate;
+    private final RestClient restClient;
 
-    public BalanceService(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
+    public BalanceService(RestClient restClient) {
+        this.restClient = restClient;
     }
 
     //@CircuitBreaker(name = BALANCE_SERVICE, fallbackMethod = "getBalanceFallback")
@@ -34,7 +35,7 @@ public class BalanceService {
             return BALANCE_UNAVAILABLE;
         }
         String url = String.format("%s/balance?accountNumber=%s", remoteServiceUrl, accountNumber);
-        Balance balance = restTemplate.getForObject(url, Balance.class);
+        Balance balance = restClient.get().uri(url).retrieve().body(Balance.class);
         logger.info("Called balance service for account: {} balance: {} duration: {}ms", accountNumber, balance, System.currentTimeMillis() - startTimeMillis);
         return balance;
     }

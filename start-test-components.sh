@@ -45,6 +45,18 @@ if ! command -v java > /dev/null 2>&1; then
   exit 1
 fi
 
+# Check if toxiproxy-cli is installed
+if ! command -v toxiproxy-cli > /dev/null 2>&1; then
+  echo "Error: toxiproxy-cli is not installed. Please install toxiproxy-cli and try again."
+  exit 1
+fi
+
+# Check if k6 is installed
+if ! command -v k6 > /dev/null 2>&1; then
+  echo "Error: k6 is not installed. Please install k6 and try again." 
+  exit 1
+fi
+
 # Check if x2i, jfr-exporter.jar and opentelemetry-agent.jar are available
 if [ ! -f x2i ] || [ ! -f jfr-exporter.jar ] || [ ! -f opentelemetry-javaagent.jar ]; then
   echo "Downloading x2i, jfr-exporter.jar and opentelemetry-agent.jar."

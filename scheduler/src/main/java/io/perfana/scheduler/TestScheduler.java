@@ -141,10 +141,10 @@ public class TestScheduler {
                     PT60S|run-command(slow-db-800ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=800
                     PT60S|run-command(slow-db-800ms)|name=alerts;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=800
                                
-                    PT90S|run-command(toxiproxy-db-drop-connection-add)|name=toxiproxy-db-drop-connection-add;proxy_name=test-postgres
-                    PT90S|run-command(toxiproxy-db-drop-connection-add)|name=alerts-text;text=toxiproxy-db-drop-connection-add
-                    PT120S|run-command(toxiproxy-db-drop-connection-remove)|name=toxiproxy-db-drop-connection-remove;proxy_name=test-postgres
-                    PT120S|run-command(toxiproxy-db-drop-connection-remove)|name=alerts-text;text=toxiproxy-db-drop-connection-remove
+                    #PT90S|run-command(toxiproxy-db-drop-connection-add)|name=toxiproxy-db-drop-connection-add;proxy_name=test-postgres
+                    #PT90S|run-command(toxiproxy-db-drop-connection-add)|name=alerts-text;text=toxiproxy-db-drop-connection-add
+                    #PT120S|run-command(toxiproxy-db-drop-connection-remove)|name=toxiproxy-db-drop-connection-remove;proxy_name=test-postgres
+                    #PT120S|run-command(toxiproxy-db-drop-connection-remove)|name=alerts-text;text=toxiproxy-db-drop-connection-remove
 
                     PT124S|run-command(slow-db-100ms)|name=toxiproxy;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=100
                     PT124S|run-command(slow-db-100ms)|name=alerts;proxy_name=test-postgres;toxic_name=pgLatency;latency_ms=100
