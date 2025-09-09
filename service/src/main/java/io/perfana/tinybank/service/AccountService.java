@@ -17,7 +17,7 @@ public class AccountService {
     public static final Customer FALLBACK_USER = new Customer("Fallback User");
     public static final Account FALLBACK_ACCOUNT = new Account(FALLBACK_USER, "FALLBACK-ACCOUNT", "Fallback Account");
 
-    @Value("${remote.account.service.url}")
+    @Value("${remote.account.service.url.http}")
     private String remoteServiceUrlHttp;
 
     @Value("${remote.account.service.url.https}")

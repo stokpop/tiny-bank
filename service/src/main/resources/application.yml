@@ -74,15 +74,31 @@ management:
 mtls:
   enabled: false
 
-# Keep flat keys for exact property names used in code
-"remote.account.service.url": "http://localhost:30123"
-"remote.account.service.url.https": "https://localhost:31123"
-"remote.balance.service.url": "http://localhost:30124"
-"remote.balance.service.url.https": "https://localhost:31124"
+# Remote service endpoints
+remote:
+  account:
+    service:
+      url:
+        http: "http://localhost:30123"
+        https: "https://localhost:31123"
+  balance:
+    service:
+      url:
+        http: "http://localhost:30124"
+        https: "https://localhost:31124"
 
 # Remote services via toxiproxy (example)
-# "remote.account.service.url": "http://localhost:20123"
-# "remote.balance.service.url": "http://localhost:20124"
+# remote:
+#   account:
+#     service:
+#       url:
+#         http: "http://localhost:20123"
+#         https: "https://localhost:21123"
+#   balance:
+#     service:
+#       url:
+#         http: "http://localhost:20124"
+#         https: "https://localhost:21124"
 
 # Resilience4j Circuit Breaker Configuration
 resilience4j:

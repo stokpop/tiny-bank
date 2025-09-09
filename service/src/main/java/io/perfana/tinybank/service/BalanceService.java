@@ -16,7 +16,7 @@ public class BalanceService {
     private static final String BALANCE_SERVICE = "balanceService";
     public static final Balance BALANCE_UNAVAILABLE = new Balance(0, "Not Available");
 
-    @Value("${remote.balance.service.url}")
+    @Value("${remote.balance.service.url.http}")
     private String remoteServiceUrlHttp;
 
     @Value("${remote.balance.service.url.https}")
