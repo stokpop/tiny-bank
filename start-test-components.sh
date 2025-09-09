@@ -154,17 +154,32 @@ echo "Open the Grafana at http://localhost:3000 and login with admin/admin"
 
 sleep 6
 
-declare services=(
-  [18080]="tiny-bank-service"
-  [13000]="tiny-fe"
-  [3000]="Grafana"
-  [30123]="Account stub"
-  [30124]="Balance stub"
-)
+# Determine stub ports based on mTLS setting
+# If MTLS_ENABLED is true (case-insensitive), check HTTPS ports 31123/31124; otherwise HTTP ports 30123/30124
+MTLS_FLAG_LOWER_CASE=$(printf '%s' "${MTLS_ENABLED:-}" | tr '[:upper:]' '[:lower:]')
+if [ "$MTLS_FLAG_LOWER_CASE" = "true" ]; then
+  ACCOUNT_PORT=31123
+  BALANCE_PORT=31124
+else
+  ACCOUNT_PORT=30123
 
-for port in "${!services[@]}"; do
-  if ! nc -z localhost "$port"; then
-    echo "Error: ${services[$port]} is not running. Please check the logs and try again."
+  BALANCE_PORT=30124
+fi
+
+# Define ports and names using indexed arrays (compatible with Bash 3.2)
+ports=(18080 13000 3000 "$ACCOUNT_PORT" "$BALANCE_PORT")
+names=("tiny-bank-service" "tiny-fe" "Grafana" "Account stub" "Balance stub")
+
+for i in "${!ports[@]}"; do
+  port="${ports[$i]}"
+  name="${names[$i]}"
+  if ! nc -z localhost "$port" >/dev/null 2>&1; then
+    echo "Error: $name is not running. Please check the logs and try again."
+    if [ "$MTLS_FLAG_LOWER_CASE" = "true" ]; then
+      echo "Hint: mTLS appears enabled (MTLS_ENABLED=true). Account/Balance stubs should listen on 31123/31124."
+    else
+      echo "Hint: mTLS appears disabled. Account/Balance stubs should listen on 30123/30124."
+    fi
     exit 1
   fi
 done

@@ -18,7 +18,13 @@ public class AccountService {
     public static final Account FALLBACK_ACCOUNT = new Account(FALLBACK_USER, "FALLBACK-ACCOUNT", "Fallback Account");
 
     @Value("${remote.account.service.url}")
-    private String remoteServiceUrl;
+    private String remoteServiceUrlHttp;
+
+    @Value("${remote.account.service.url.https}")
+    private String remoteServiceUrlHttps;
+
+    @Value("${mtls.enabled:false}")
+    private boolean mtlsEnabled;
 
     private final RestClient restClient;
 
@@ -30,7 +36,8 @@ public class AccountService {
     @CircuitBreaker(name = ACCOUNT_SERVICE)
     public Account getAccount(String userId) {
         long startTimeMillis = System.currentTimeMillis();
-        String url = String.format("%s/account?userId=%s", remoteServiceUrl, userId);
+        String baseUrl = mtlsEnabled ? remoteServiceUrlHttps : remoteServiceUrlHttp;
+        String url = String.format("%s/account?userId=%s", baseUrl, userId);
         Account account = restClient.get().uri(url).retrieve().body(Account.class);
         logger.info("Called account service for user: {} account: {} duration: {}ms", userId, account, System.currentTimeMillis() - startTimeMillis);
         return account;

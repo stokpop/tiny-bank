@@ -204,6 +204,64 @@ With added circuit breakers, check settings:
 curl -Ss localhost:18080/actuator/circuitbreakers | jq
 ```
 
+## Mutual TLS (mTLS): enable or disable
+
+This project can secure the Tiny Bank service's outgoing calls to the WireMock stubs (Account and Balance services) using mutual TLS.
+
+What gets secured
+- When enabled, the service calls the WireMock stubs over HTTPS with client authentication.
+- Ports:
+  - HTTP (no mTLS): 30123 (account), 30124 (balance)
+  - HTTPS (mTLS): 31123 (account), 31124 (balance)
+- Certificates and truststores are generated locally and used by both the service (client) and the stubs (server).
+
+1) Generate local test certificates (one time)
+- Run: ./mtls-certs/mtls-certificate-setup.sh
+- Outputs to: target/generated-certs
+- Password for all keystores/truststores: changeit
+- Files used by defaults:
+  - Service client auth: client.p12 and client-truststore.p12
+  - WireMock server: server.p12 and server-truststore.p12
+
+2) Enable mTLS
+You can enable mTLS with either a JVM system property or an environment variable. Use the same toggle for both the WireMock stubs and the Tiny Bank service.
+
+Option A: Environment variable (recommended)
+- One-liner to start all components with mTLS enabled:
+  MTLS_ENABLED=true ./start-test-components.sh
+- Or if you start things manually in separate terminals, export once:
+  export MTLS_ENABLED=true
+  # then start the stubs and the service in that shell
+
+Option B: JVM flag per process
+- When you run the WireMock stub jars manually:
+  java -Dmtls.enabled=true -jar service/target/tiny-bank-service-0.0.1-account-stub-SNAPSHOT.jar
+  java -Dmtls.enabled=true -jar service/target/tiny-bank-service-0.0.1-balance-stub-SNAPSHOT.jar
+- When you run the Spring Boot service:
+  java -Dmtls.enabled=true -jar service/target/tiny-bank-service-0.0.1-SNAPSHOT.jar
+
+Notes
+- The default keystore/truststore locations are configured in service/src/main/resources/application.properties and point to target/generated-certs:
+  - mtls.keystore.path=target/generated-certs/client.p12
+  - mtls.keystore.password=changeit
+  - mtls.truststore.path=target/generated-certs/client-truststore.p12
+  - mtls.truststore.password=changeit
+- You can override any of these with -Dmtls.keystore.path=..., etc.
+- The WireMock stubs will listen on their normal HTTP ports; with mTLS enabled they also expose HTTPS on 31123/31124 and require client auth.
+- The service automatically selects the https base URLs when mTLS is enabled.
+
+3) Disable mTLS
+- This is the default. Either omit the flag/variable or explicitly set:
+  -Dmtls.enabled=false
+  or
+  MTLS_ENABLED=false
+- The service will call the stubs over plain HTTP (ports 30123/30124) and will not load client certificates.
+
+4) Quick verification
+- After starting with mTLS enabled, the service logs will contain:
+  mTLS is enabled: configuring SSLContext for Apache HttpClient
+- The Account and Balance WireMock processes will start HTTPS listeners on ports 31123 and 31124 respectively.
+
 ## Credits
 
 <a target="_blank" href="https://icons8.com/icon/21709/bank-euro">bank-euro</a> icon by <a target="_blank" href="https://icons8.com">Icons8</a>

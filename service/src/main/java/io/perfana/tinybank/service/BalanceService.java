@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.Objects;
 
@@ -18,7 +17,13 @@ public class BalanceService {
     public static final Balance BALANCE_UNAVAILABLE = new Balance(0, "Not Available");
 
     @Value("${remote.balance.service.url}")
-    private String remoteServiceUrl;
+    private String remoteServiceUrlHttp;
+
+    @Value("${remote.balance.service.url.https}")
+    private String remoteServiceUrlHttps;
+
+    @Value("${mtls.enabled:false}")
+    private boolean mtlsEnabled;
 
     private final RestClient restClient;
 
@@ -34,7 +39,8 @@ public class BalanceService {
         if (Objects.equals(accountNumber, AccountService.FALLBACK_ACCOUNT.accountNumber())) {
             return BALANCE_UNAVAILABLE;
         }
-        String url = String.format("%s/balance?accountNumber=%s", remoteServiceUrl, accountNumber);
+        String baseUrl = mtlsEnabled ? remoteServiceUrlHttps : remoteServiceUrlHttp;
+        String url = String.format("%s/balance?accountNumber=%s", baseUrl, accountNumber);
         Balance balance = restClient.get().uri(url).retrieve().body(Balance.class);
         logger.info("Called balance service for account: {} balance: {} duration: {}ms", accountNumber, balance, System.currentTimeMillis() - startTimeMillis);
         return balance;
