@@ -14,14 +14,11 @@ import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManager;
 import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
-import org.apache.hc.client5.http.socket.ConnectionSocketFactory;
-import org.apache.hc.client5.http.socket.PlainConnectionSocketFactory;
-import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
+import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
+import org.apache.hc.client5.http.ssl.TlsSocketStrategy;
 import org.apache.hc.core5.http.HttpHeaders;
 import org.apache.hc.core5.http.HttpRequestInterceptor;
 import org.apache.hc.core5.http.HttpResponseInterceptor;
-import org.apache.hc.core5.http.config.Registry;
-import org.apache.hc.core5.http.config.RegistryBuilder;
 import org.apache.hc.core5.http.message.BasicHeader;
 import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
@@ -38,6 +35,7 @@ import org.springframework.http.client.reactive.HttpComponentsClientHttpConnecto
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import javax.net.ssl.SSLContext;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
@@ -65,6 +63,7 @@ public class TinyBankApplicationConfig {
 
     @Bean
     public CloseableHttpClient httpClient(ObservationRegistry observationRegistry, MeterRegistry meterRegistry, SslBundles sslBundles) {
+
         // Define defaults that do NOT include TTL; TTL is set on the connection manager itself.
         ConnectionConfig connectionConfig = ConnectionConfig.custom()
                 .setTimeToLive(TimeValue.ofSeconds(60)) // TTL for persistent connections
@@ -75,56 +74,12 @@ public class TinyBankApplicationConfig {
         PoolingHttpClientConnectionManager connectionManager;
         if (mtlsEnabled) {
             logger.info("mTLS is enabled: configuring Apache HttpClient with SSLContext from Spring SSL bundle");
-            try {
-                javax.net.ssl.SSLContext sslContext;
-                try {
-                    // Try to obtain SSL context from Spring SSL bundle first
-                    SslBundle bundle = sslBundles.getBundle("mtls-client");
-                    try {
-                        sslContext = bundle.createSslContext();
-                    } catch (NoSuchMethodError | Exception ignored) {
-                        var managers = bundle.getManagers();
-                        var kmf = managers.getKeyManagerFactory();
-                        var tmf = managers.getTrustManagerFactory();
-                        sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
-                        sslContext.init(kmf != null ? kmf.getKeyManagers() : null,
-                                tmf != null ? tmf.getTrustManagers() : null,
-                                null);
-                    }
-                } catch (org.springframework.boot.ssl.NoSuchSslBundleException nsbe) {
-                    // Fallback: build SSLContext from explicit keystore/truststore properties
-                    logger.warn("SSL bundle 'mtls-client' not found. Falling back to keystore/truststore at configured mtls.* paths: keystore={}, truststore={}", keyStorePath, trustStorePath);
-                    java.security.KeyStore keyStore = java.security.KeyStore.getInstance("PKCS12");
-                    try (java.io.FileInputStream fis = new java.io.FileInputStream(keyStorePath)) {
-                        keyStore.load(fis, keyStorePassword != null ? keyStorePassword.toCharArray() : new char[0]);
-                    }
-                    java.security.KeyStore trustStore = java.security.KeyStore.getInstance("PKCS12");
-                    try (java.io.FileInputStream fis = new java.io.FileInputStream(trustStorePath)) {
-                        trustStore.load(fis, trustStorePassword != null ? trustStorePassword.toCharArray() : new char[0]);
-                    }
-                    sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
-                    javax.net.ssl.KeyManagerFactory kmf = javax.net.ssl.KeyManagerFactory.getInstance(javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
-                    kmf.init(keyStore, keyStorePassword != null ? keyStorePassword.toCharArray() : new char[0]);
-                    javax.net.ssl.TrustManagerFactory tmf = javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
-                    tmf.init(trustStore);
-                    sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
-                }
-
-                SSLConnectionSocketFactory sslSocketFactory = new SSLConnectionSocketFactory(sslContext);
-                Registry<ConnectionSocketFactory> socketFactoryRegistry = RegistryBuilder.<ConnectionSocketFactory>create()
-                        .register("http", PlainConnectionSocketFactory.getSocketFactory())
-                        .register("https", sslSocketFactory)
-                        .build();
-                connectionManager = new PoolingHttpClientConnectionManager(socketFactoryRegistry);
-                connectionManager.setDefaultConnectionConfig(connectionConfig);
-            } catch (Exception e) {
-                throw new IllegalStateException("Failed to create SSL-enabled Apache HttpClient; SSL bundle missing and fallback failed", e);
-            }
+            connectionManager = createConnectionManagerWithMtls(sslBundles, connectionConfig);
         } else {
-            logger.info("mTLS is disabled: using default Apache HttpClient connection manager (no client certificates)");
+            logger.info("mTLS is disabled: using default Apache HttpClient5 connection manager (no client certificates)");
             connectionManager = PoolingHttpClientConnectionManagerBuilder.create()
                     .setDefaultConnectionConfig(connectionConfig)
-                    .setConnectionTimeToLive(TimeValue.ofSeconds(60))
+                    //.setConnectionTimeToLive(TimeValue.ofSeconds(60)) // -> DEPRECATED
                     .build();
         }
 
@@ -136,13 +91,13 @@ public class TinyBankApplicationConfig {
 
         RequestConfig requestConfig = RequestConfig.custom()
                 .setConnectionRequestTimeout(Timeout.ofMilliseconds(100))
-                .setConnectTimeout(Timeout.ofMilliseconds(100))
+                //.setConnectTimeout(Timeout.ofMilliseconds(100)) // -> DEPRECATED
                 .setResponseTimeout(Timeout.ofMilliseconds(1200))
                 .build();
 
         var httpClientBuilder = HttpClients.custom()
                 .disableAutomaticRetries()
-                .disableConnectionState()
+                .disableConnectionState() // needed for mTLS connection reuse!
                 .evictExpiredConnections()
                 .evictIdleConnections(TimeValue.ofSeconds(30))
                 .setConnectionManager(connectionManager)
@@ -156,6 +111,35 @@ public class TinyBankApplicationConfig {
                 .addExecInterceptorLast("micrometer", new ObservationExecChainHandler(observationRegistry));
 
         return httpClientBuilder.build();
+    }
+
+    private static PoolingHttpClientConnectionManager createConnectionManagerWithMtls(SslBundles sslBundles, ConnectionConfig connectionConfig) {
+        PoolingHttpClientConnectionManager connectionManager;
+        try {
+            SSLContext sslContext;
+            try {
+                // Try to obtain SSL context from Spring SSL bundle
+                SslBundle bundle = sslBundles.getBundle("mtls-client");
+                sslContext = bundle.createSslContext();
+            } catch (org.springframework.boot.ssl.NoSuchSslBundleException nsbe) {
+                String msg = "SSL bundle 'mtls-client' not found.";
+                logger.error(msg);
+                throw new IllegalStateException(msg, nsbe);
+            }
+
+            TlsSocketStrategy tlsStrategy = new DefaultClientTlsStrategy(sslContext);
+
+            connectionManager = PoolingHttpClientConnectionManagerBuilder.create()
+                    .setDefaultConnectionConfig(connectionConfig)
+                    .setTlsSocketStrategy(tlsStrategy)
+                    .build();
+
+            connectionManager.setDefaultConnectionConfig(connectionConfig);
+
+            return connectionManager;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to create SSL-enabled Apache HttpClient; SSL bundle missing.", e);
+        }
     }
 
     private static HttpResponseInterceptor createHttpResponseInterceptor() {
@@ -202,13 +186,6 @@ public class TinyBankApplicationConfig {
         return RestClient.builder().requestFactory(factory).build();
     }
 
-//    @Bean
-//    public RestTemplate restTemplate(CloseableHttpClient httpClient) {
-//        HttpComponentsClientHttpRequestFactory requestFactory = new HttpComponentsClientHttpRequestFactory(httpClient);
-//        RestTemplate restTemplate = new RestTemplate(requestFactory);
-//        restTemplate.setErrorHandler(new CustomResponseErrorHandler());
-//        return restTemplate;
-//    }
 
     @Bean
     public CloseableHttpAsyncClient httpAsyncClient() {
