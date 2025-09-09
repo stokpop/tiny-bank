@@ -6,14 +6,10 @@ import io.micrometer.core.instrument.binder.httpcomponents.hc5.PoolingHttpClient
 import io.micrometer.observation.ObservationRegistry;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
-import org.apache.hc.client5.http.impl.async.CloseableHttpAsyncClient;
-import org.apache.hc.client5.http.impl.async.HttpAsyncClients;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
-import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManager;
-import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
 import org.apache.hc.client5.http.ssl.TlsSocketStrategy;
 import org.apache.hc.core5.http.HttpHeaders;
@@ -30,10 +26,7 @@ import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
-import org.springframework.http.client.reactive.ClientHttpConnector;
-import org.springframework.http.client.reactive.HttpComponentsClientHttpConnector;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import javax.net.ssl.SSLContext;
 import java.net.URI;
@@ -47,19 +40,6 @@ public class TinyBankApplicationConfig {
 
     @Value("${mtls.enabled:false}")
     private boolean mtlsEnabled;
-
-    @Value("${mtls.keystore.path:}")
-    private String keyStorePath;
-
-    @Value("${mtls.keystore.password:}")
-    private String keyStorePassword;
-
-    @Value("${mtls.truststore.path:}")
-    private String trustStorePath;
-
-    @Value("${mtls.truststore.password:}")
-    private String trustStorePassword;
-
 
     @Bean
     public CloseableHttpClient httpClient(ObservationRegistry observationRegistry, MeterRegistry meterRegistry, SslBundles sslBundles) {
@@ -142,6 +122,12 @@ public class TinyBankApplicationConfig {
         }
     }
 
+    @Bean
+    RestClient restClient(CloseableHttpClient httpClient) {
+        var factory = new HttpComponentsClientHttpRequestFactory(httpClient);
+        return RestClient.builder().requestFactory(factory).build();
+    }
+
     private static HttpResponseInterceptor createHttpResponseInterceptor() {
         return (response, entityDetails, context) -> {
             // Ensure outcome is properly set based on status code
@@ -163,14 +149,14 @@ public class TinyBankApplicationConfig {
     private static HttpRequestInterceptor createHttpRequestInterceptor() {
         return (request, entityDetails, context) -> {
             // Set URI template for proper metrics tagging
-            String uri = null;
-            String path = null;
+            String uri;
+            String path;
             try {
                 URI requestUri = request.getUri();
                 uri = requestUri.toString();
                 path = requestUri.getPath();
             } catch (URISyntaxException e) {
-                throw new RuntimeException(e);
+                throw new IllegalStateException("Failed to parse uri from request.", e);
             }
 
             // Store both full URI and path for Micrometer
@@ -180,40 +166,4 @@ public class TinyBankApplicationConfig {
         };
     }
 
-    @Bean
-    RestClient restClient(CloseableHttpClient httpClient) {
-        var factory = new HttpComponentsClientHttpRequestFactory(httpClient);
-        return RestClient.builder().requestFactory(factory).build();
-    }
-
-
-    @Bean
-    public CloseableHttpAsyncClient httpAsyncClient() {
-        ConnectionConfig connectionConfig = ConnectionConfig.custom().build();
-
-        PoolingAsyncClientConnectionManager asyncConnMgr =
-                PoolingAsyncClientConnectionManagerBuilder.create()
-                        .setDefaultConnectionConfig(connectionConfig)
-                        .setConnectionTimeToLive(TimeValue.ofSeconds(60)) // TTL like your classic client
-                        .build();
-
-        CloseableHttpAsyncClient asyncClient = HttpAsyncClients.custom()
-                .setConnectionManager(asyncConnMgr)
-                // Optional proactive eviction (helps enforce TTL/idle in practice)
-                .evictExpiredConnections()
-                .evictIdleConnections(TimeValue.ofSeconds(30))
-                .build();
-
-        asyncClient.start();
-        return asyncClient;
-    }
-
-    @Bean
-    public WebClient webClient(CloseableHttpAsyncClient httpAsyncClient) {
-        ClientHttpConnector connector = new HttpComponentsClientHttpConnector(httpAsyncClient);
-        return WebClient.builder()
-                .clientConnector(connector)
-                // Optional: default headers, baseUrl, codecs, filters, etc.
-                .build();
-    }
 }
