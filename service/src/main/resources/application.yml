@@ -1,0 +1,123 @@
+spring:
+  application:
+    name: tiny-bank
+  jmx:
+    enabled: true
+  ssl:
+    bundle:
+      jks:
+        mtls-client:
+          keystore:
+            location: target/generated-certs/client.p12
+            password: changeit
+            type: PKCS12
+          truststore:
+            location: target/generated-certs/client-truststore.p12
+            password: changeit
+            type: PKCS12
+  datasource:
+    url: jdbc:postgresql://localhost:15432/tiny_bank_db
+    username: pipo
+    password: test123
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      register-mbeans: true
+      maximum-pool-size: 30
+      minimum-idle: 4
+      connection-timeout: 3000
+      # connection-test-query: SELECT 1
+      validation-timeout: 400
+      idle-timeout: 60000
+      max-lifetime: 80000
+      pool-name: TinyBankDbConPool
+  jpa:
+    open-in-view: true
+    hibernate:
+      ddl-auto: create-drop
+    # properties:
+    #   hibernate:
+    #     dialect: org.hibernate.dialect.PostgreSQLDialect
+
+server:
+  port: 18080
+
+management:
+  endpoints:
+    jmx:
+      exposure:
+        include: "*"
+    web:
+      exposure:
+        include: health,metrics,prometheus,env,circuitbreakers
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  metrics:
+    tags:
+      system_under_test: tiny-bank
+      test_environment: silver
+      service: tiny-bank-service
+  health:
+    circuitbreakers:
+      enabled: true
+  endpoint:
+    health:
+      show-details: always
+      group:
+        liveness:
+          include: ping
+        readiness:
+          include: db,circuitBreakers
+
+# Remote services / mTLS
+mtls:
+  enabled: false
+
+# Keep flat keys for exact property names used in code
+"remote.account.service.url": "http://localhost:30123"
+"remote.account.service.url.https": "https://localhost:31123"
+"remote.balance.service.url": "http://localhost:30124"
+"remote.balance.service.url.https": "https://localhost:31124"
+
+# Remote services via toxiproxy (example)
+# "remote.account.service.url": "http://localhost:20123"
+# "remote.balance.service.url": "http://localhost:20124"
+
+# Resilience4j Circuit Breaker Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      balanceService:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        waitDurationInOpenState: 5000
+        permittedNumberOfCallsInHalfOpenState: 2
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        slidingWindowType: TIME_BASED
+        maxWaitDurationInHalfOpenState: 5000
+        slowCallRateThreshold: 50
+        slowCallDurationThreshold: 800
+        minimumNumberOfCalls: 3
+        failureRateThreshold: 50
+      accountService:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        waitDurationInOpenState: 5000
+        permittedNumberOfCallsInHalfOpenState: 2
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        slidingWindowType: TIME_BASED
+        maxWaitDurationInHalfOpenState: 5000
+        # slowCallRateThreshold: 50
+        # slowCallDurationThreshold: 800
+        minimumNumberOfCalls: 3
+        failureRateThreshold: 20
+
+logging:
+  level:
+    com.zaxxer.hikari: TRACE
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: INFO
+    # io.perfana.tinybank.service.AccountService: WARN
+    # io.perfana.tinybank.service.BalanceService: WARN
+    # io.perfana.tinybank.api.TinyBankController: WARN
