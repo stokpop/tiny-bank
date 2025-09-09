@@ -12,21 +12,24 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManager;
+import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.socket.ConnectionSocketFactory;
 import org.apache.hc.client5.http.socket.PlainConnectionSocketFactory;
 import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
-import org.apache.hc.core5.http.config.Registry;
-import org.apache.hc.core5.http.config.RegistryBuilder;
-import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManager;
-import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
+import org.apache.hc.core5.http.HttpHeaders;
 import org.apache.hc.core5.http.HttpRequestInterceptor;
 import org.apache.hc.core5.http.HttpResponseInterceptor;
-import org.apache.hc.core5.ssl.SSLContexts;
+import org.apache.hc.core5.http.config.Registry;
+import org.apache.hc.core5.http.config.RegistryBuilder;
+import org.apache.hc.core5.http.message.BasicHeader;
 import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.ssl.SslBundle;
+import org.springframework.boot.ssl.SslBundles;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
@@ -34,14 +37,10 @@ import org.springframework.http.client.reactive.ClientHttpConnector;
 import org.springframework.http.client.reactive.HttpComponentsClientHttpConnector;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.boot.ssl.SslBundle;
-import org.springframework.boot.ssl.SslBundles;
 
-import java.io.FileInputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.security.KeyStore;
-import java.util.concurrent.TimeUnit;
+import java.util.List;
 
 @Configuration
 public class TinyBankApplicationConfig {
@@ -129,20 +128,29 @@ public class TinyBankApplicationConfig {
                     .build();
         }
 
+        // Tune pool sizes to ensure reuse under concurrency
+        connectionManager.setMaxTotal(100);
+        connectionManager.setDefaultMaxPerRoute(50);
+
         new PoolingHttpClientConnectionManagerMetricsBinder(connectionManager, "tiny-bank-http-pool").bindTo(meterRegistry);
 
         RequestConfig requestConfig = RequestConfig.custom()
-                .setConnectionRequestTimeout(100, TimeUnit.MILLISECONDS)
-                .setConnectTimeout(100, TimeUnit.MILLISECONDS)
-                .setResponseTimeout(1200, TimeUnit.MILLISECONDS)
+                .setConnectionRequestTimeout(Timeout.ofMilliseconds(100))
+                .setConnectTimeout(Timeout.ofMilliseconds(100))
+                .setResponseTimeout(Timeout.ofMilliseconds(1200))
                 .build();
 
         var httpClientBuilder = HttpClients.custom()
                 .disableAutomaticRetries()
+                .disableConnectionState()
                 .evictExpiredConnections()
                 .evictIdleConnections(TimeValue.ofSeconds(30))
                 .setConnectionManager(connectionManager)
                 .setDefaultRequestConfig(requestConfig)
+                // Encourage persistent connections even when server omits keep-alive headers
+                .setKeepAliveStrategy((response, context) -> TimeValue.ofSeconds(60))
+                // Be explicit about intent to keep the connection alive
+                .setDefaultHeaders(List.of(new BasicHeader(HttpHeaders.CONNECTION, "keep-alive")))
                 .addRequestInterceptorFirst(createHttpRequestInterceptor())
                 .addResponseInterceptorLast(createHttpResponseInterceptor())
                 .addExecInterceptorLast("micrometer", new ObservationExecChainHandler(observationRegistry));
