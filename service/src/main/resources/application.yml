@@ -20,6 +20,7 @@ spring:
     username: pipo
     password: test123
     driver-class-name: org.postgresql.Driver
+    # note: all hikari timeouts are in milliseconds
     hikari:
       register-mbeans: true
       maximum-pool-size: 30
@@ -107,25 +108,25 @@ resilience4j:
       balanceService:
         registerHealthIndicator: true
         slidingWindowSize: 10
-        waitDurationInOpenState: 5000
+        waitDurationInOpenState: 5s
         permittedNumberOfCallsInHalfOpenState: 2
         automaticTransitionFromOpenToHalfOpenEnabled: true
         slidingWindowType: TIME_BASED
-        maxWaitDurationInHalfOpenState: 5000
+        maxWaitDurationInHalfOpenState: 5s
         slowCallRateThreshold: 50
-        slowCallDurationThreshold: 800
+        slowCallDurationThreshold: 800ms
         minimumNumberOfCalls: 3
         failureRateThreshold: 50
       accountService:
         registerHealthIndicator: true
         slidingWindowSize: 10
-        waitDurationInOpenState: 5000
+        waitDurationInOpenState: 5s
         permittedNumberOfCallsInHalfOpenState: 2
         automaticTransitionFromOpenToHalfOpenEnabled: true
         slidingWindowType: TIME_BASED
-        maxWaitDurationInHalfOpenState: 5000
+        maxWaitDurationInHalfOpenState: 5s
         # slowCallRateThreshold: 50
-        # slowCallDurationThreshold: 800
+        # slowCallDurationThreshold: 800ms
         minimumNumberOfCalls: 3
         failureRateThreshold: 20
 
