@@ -39,10 +39,10 @@ java -jar target/visualisation-1.0.0-SNAPSHOT.jar
 ```
 
 ## What you see
-- Left box pre-filled with colored balls (and returning squares)
+- Left box pre-filled with green-shaded balls (hollow) and returning squares
 - A top pipe connecting the left box to the right box; balls flow through it
-- In the right box, balls are converted into squares
-- A bottom pipe sends squares back to the left box
+- In the right box, balls are converted into filled squares. About 10% become red squares; the rest keep their original green shade
+- A bottom pipe sends squares back to the left box where squares stack from the bottom upward
 - Mild jitter/wobble animation and randomized spawn intervals for a natural feel
 
 Enjoy!

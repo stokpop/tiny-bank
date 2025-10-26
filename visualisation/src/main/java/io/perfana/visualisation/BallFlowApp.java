@@ -125,7 +125,11 @@ public class BallFlowApp extends Application {
             inPipeL2R.removeAll(arrivedTop);
             for (Ball b : arrivedTop) {
                 // Convert arriving balls into squares in the right box
-                rightSquares.add(new Square(0, 0, b.color, 0));
+                // ~10% chance to turn into a red square; otherwise keep the same green shade
+                Color squareColor = (random.nextDouble() < 0.30)
+                        ? Color.web("#ef4444") // red
+                        : b.color;
+                rightSquares.add(new Square(0, 0, squareColor, 0));
             }
         }
 
@@ -231,26 +235,49 @@ public class BallFlowApp extends Application {
     }
 
     private void drawMixedInBox(GraphicsContext g, double boxX, double boxY, Deque<Ball> balls, Deque<Square> squares) {
+        // Grid dimensions
         int cols = (int) Math.max(1, Math.floor((BOX_WIDTH - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
         int rows = (int) Math.max(1, Math.floor((BOX_HEIGHT - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
-        int index = 0;
+
+        // 1) Draw balls from the TOP, left-to-right, top-to-bottom (as-is)
+        int ballIndex = 0;
         for (Ball b : balls) {
-            int row = index / cols;
-            int col = index % cols;
-            if (row >= rows) break;
+            int row = ballIndex / cols;
+            int col = ballIndex % cols;
+            if (row >= rows) {
+                // No more space; stop drawing anything else in this box
+                return;
+            }
             double x = boxX + BALL_RADIUS + 6 + col * (BALL_RADIUS * 2 + 4);
             double y = boxY + BALL_RADIUS + 6 + row * (BALL_RADIUS * 2 + 4);
             drawBall(g, x, y, b.color);
-            index++;
+            ballIndex++;
         }
+
+        // Number of rows occupied by balls
+        int ballRows = (int) Math.ceil(ballIndex / (double) cols);
+        if (ballRows > rows) ballRows = rows;
+
+        // 2) Draw returned squares from the BOTTOM upwards, without overlapping ball rows
+        int availableRowsForSquares = rows - ballRows;
+        if (availableRowsForSquares <= 0) {
+            return; // no vertical space below the balls
+        }
+        int capacitySquares = availableRowsForSquares * cols;
+
+        int squareIndex = 0;
         for (Square s : squares) {
-            int row = index / cols;
-            int col = index % cols;
-            if (row >= rows) break;
+            if (squareIndex >= capacitySquares) break; // no more space for squares
+
+            int rowFromBottom = squareIndex / cols; // 0 = bottom row, then upwards
+            int row = rows - 1 - rowFromBottom;      // actual row index from top
+            int col = squareIndex % cols;
+
             double x = boxX + BALL_RADIUS + 6 + col * (BALL_RADIUS * 2 + 4);
             double y = boxY + BALL_RADIUS + 6 + row * (BALL_RADIUS * 2 + 4);
             drawSquare(g, x, y, s.color);
-            index++;
+
+            squareIndex++;
         }
     }
 
@@ -270,9 +297,9 @@ public class BallFlowApp extends Application {
     }
 
     private void drawBall(GraphicsContext g, double x, double y, Color color) {
-        g.setFill(color);
-        g.fillOval(x - BALL_RADIUS, y - BALL_RADIUS, BALL_RADIUS * 2, BALL_RADIUS * 2);
-        g.setStroke(Color.color(0,0,0,0.4));
+        // Draw hollow ball (outline only)
+        g.setStroke(color);
+        g.setLineWidth(2.5);
         g.strokeOval(x - BALL_RADIUS, y - BALL_RADIUS, BALL_RADIUS * 2, BALL_RADIUS * 2);
     }
 
@@ -284,8 +311,11 @@ public class BallFlowApp extends Application {
     }
 
     private Ball createRandomBallInLeftBox() {
-        double hue = random.nextDouble();
-        Color color = Color.hsb(hue * 360, 0.7, 0.95);
+        // Generate only shades of green: restrict hue to the green band (~100°–180°)
+        double hueDeg = 100 + random.nextDouble() * 80; // [100, 180)
+        double saturation = 0.65 + random.nextDouble() * 0.3; // [0.65, 0.95)
+        double brightness = 0.80 + random.nextDouble() * 0.2; // [0.80, 1.0)
+        Color color = Color.hsb(hueDeg, saturation, brightness);
         return new Ball(0, 0, color, 0);
     }
 
