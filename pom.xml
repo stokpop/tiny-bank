@@ -11,9 +11,20 @@
     <modules>
         <module>service</module>
         <module>scheduler</module>
+        <module>visualisation</module>
     </modules>
 
     <build>
+        <pluginManagement>
+            <plugins>
+                <!-- Keep JavaFX plugin only for prefix resolution/reference; do not execute at root -->
+                <plugin>
+                    <groupId>org.openjfx</groupId>
+                    <artifactId>javafx-maven-plugin</artifactId>
+                    <version>0.0.8</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
