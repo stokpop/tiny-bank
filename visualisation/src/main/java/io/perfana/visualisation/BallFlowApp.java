@@ -53,7 +53,7 @@ public class BallFlowApp extends Application {
     private final Random random = new Random();
 
     private record Ball(double x, double y, Color color, double speed, long startMs, boolean cbChecked, boolean shortCircuited) {}
-    private record Square(double x, double y, Color color, double speed) {}
+    private record Square(double x, double y, Color color, double speed, Outcome outcome, boolean occupiesSlot) {}
     private record ShortCircuitTransition(double x, double yStart, double yEnd, double speed, long startMs, long durationMs, double currentY) {}
 
     // CircuitBreaker model
@@ -63,6 +63,9 @@ public class BallFlowApp extends Application {
     private long shortCircuitedCount = 0L;
     private float failureRateThreshold = 50.0f;
     private int bufferVisualSize = 5; // visualize last N outcomes (align with sliding window)
+
+    // In-flight pool tracking: increment on permit, decrement only when the returning square crosses the CB on the way back
+    private int currentInFlight = 0;
 
     private enum Outcome { SUCCESS, FAILURE, NOT_PERMITTED }
     private final Deque<Outcome> recentOutcomes = new ArrayDeque<>();
@@ -106,7 +109,7 @@ public class BallFlowApp extends Application {
                 .failureRateThreshold(50.0f)
                 .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
                 .slidingWindowSize(5)
-                .minimumNumberOfCalls(10)
+                .minimumNumberOfCalls(4)
                 .waitDurationInOpenState(Duration.ofSeconds(3))
                 .permittedNumberOfCallsInHalfOpenState(5)
                 .automaticTransitionFromOpenToHalfOpenEnabled(true)
@@ -175,14 +178,14 @@ public class BallFlowApp extends Application {
 
             // At CB position, if not yet checked, decide permission with connection pool gating
             if (!b.cbChecked && newX >= cbX) {
-                int inFlight = (int) inPipeL2R.stream().filter(bb -> bb.cbChecked).count();
-                if (inFlight >= MAX_IN_FLIGHT) {
+                if (currentInFlight >= MAX_IN_FLIGHT) {
                     // No capacity: hold at CB icon; try again next frame
                     moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startMs, false, false);
                 } else {
                     try {
                         circuitBreaker.acquirePermission();
-                        // permitted: mark as checked and continue as ball
+                        // permitted: consume a pool slot and continue as ball
+                        currentInFlight++;
                         moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startMs, true, false);
                     } catch (CallNotPermittedException e) {
                         // denied: start a short transition INSIDE the CB column from top pipe center to bottom pipe center
@@ -216,12 +219,12 @@ public class BallFlowApp extends Application {
                 boolean failed = random.nextDouble() < failureProbability;
                 if (failed) {
                     circuitBreaker.onError(durationMs, TimeUnit.MILLISECONDS, new RuntimeException("simulated-failure"));
-                    rightSquares.add(new Square(0, 0, Color.web("#ef4444"), 0));
-                    addOutcome(Outcome.FAILURE);
+                    // Store failure outcome with the square; it still occupies the pool slot until it crosses the CB on return
+                    rightSquares.add(new Square(0, 0, Color.web("#ef4444"), 0, Outcome.FAILURE, true));
                 } else {
                     circuitBreaker.onSuccess(durationMs, TimeUnit.MILLISECONDS);
-                    rightSquares.add(new Square(0, 0, b.color, 0));
-                    addOutcome(Outcome.SUCCESS);
+                    // Store success outcome with the square; it still occupies the pool slot until it crosses the CB on return
+                    rightSquares.add(new Square(0, 0, b.color, 0, Outcome.SUCCESS, true));
                 }
             }
         }
@@ -232,7 +235,7 @@ public class BallFlowApp extends Application {
             Square s = inPipeL2RShort.get(i);
             double newX = s.x + s.speed * deltaSec;
             double newY = clampToPipe(s.y + wobble(deltaSec), pipeTopY, pipeHeight, SQUARE_SIZE / 2.0);
-            Square moved = new Square(newX, newY, s.color, s.speed);
+            Square moved = new Square(newX, newY, s.color, s.speed, s.outcome, s.occupiesSlot);
             inPipeL2RShort.set(i, moved);
             if (newX >= rightBoxX + BOX_WIDTH / 2.0 - BALL_RADIUS) {
                 arrivedShort.add(moved);
@@ -242,7 +245,7 @@ public class BallFlowApp extends Application {
             inPipeL2RShort.removeAll(arrivedShort);
             // deposit orange squares into right box
             for (Square s : arrivedShort) {
-                rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0));
+                rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0, Outcome.NOT_PERMITTED, false));
             }
         }
 
@@ -262,7 +265,7 @@ public class BallFlowApp extends Application {
             if (!finished.isEmpty()) {
                 for (ShortCircuitTransition t : finished) {
                     // inject orange square into bottom pipe at CB X and bottom center Y, preserving speed
-                    inPipeR2L.add(new Square(t.x, t.yEnd, SHORT_CIRCUIT_COLOR, t.speed));
+                    inPipeR2L.add(new Square(t.x, t.yEnd, SHORT_CIRCUIT_COLOR, t.speed, Outcome.NOT_PERMITTED, false));
                 }
                 shortCircuitTransitions.removeAll(finished);
             }
@@ -274,7 +277,7 @@ public class BallFlowApp extends Application {
             if (nextSq != null) {
                 double pipeEntryX = rightBoxX - (SQUARE_SIZE / 2.0) - 6; // start more to the right inside the pipe
                 double pipeEntryY = pipeBottomY + pipeHeight / 2.0; // exact center of bottom pipe
-                inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, nextSq.color, 80 + random.nextDouble() * 120));
+                inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, nextSq.color, 80 + random.nextDouble() * 120, nextSq.outcome, nextSq.occupiesSlot));
             }
             lastSpawnR2LNs = now;
         }
@@ -285,7 +288,25 @@ public class BallFlowApp extends Application {
             Square s = inPipeR2L.get(i);
             double newX = s.x - s.speed * deltaSec; // moving leftwards
             double newY = clampToPipe(s.y + wobble(deltaSec), pipeBottomY, pipeHeight, SQUARE_SIZE / 2.0);
-            Square moved = new Square(newX, newY, s.color, s.speed);
+
+            // When passing the CB column on the right side, update the buffer with this call's outcome once
+            boolean crossedCb = s.x > cbX && newX <= cbX;
+            Outcome outcomeForBuffer = s.outcome;
+            boolean occupies = s.occupiesSlot;
+            if (crossedCb) {
+                if (outcomeForBuffer != null) {
+                    addOutcome(outcomeForBuffer);
+                    // clear outcome after accounting, so it won't be counted again
+                    outcomeForBuffer = null;
+                }
+                // Reduce in-flight only when the returning square reaches back to the CB
+                if (occupies) {
+                    currentInFlight = Math.max(0, currentInFlight - 1);
+                    occupies = false; // prevent double-decrement
+                }
+            }
+
+            Square moved = new Square(newX, newY, s.color, s.speed, outcomeForBuffer, occupies);
             inPipeR2L.set(i, moved);
 
             // Stop a bit earlier before entering the left box: at the start of the bottom pipe plus small margin
@@ -296,7 +317,7 @@ public class BallFlowApp extends Application {
         }
         if (!arrivedBottom.isEmpty()) {
             inPipeR2L.removeAll(arrivedBottom);
-            leftSquares.addAll(arrivedBottom.stream().map(s -> new Square(0, 0, s.color, 0)).toList());
+            leftSquares.addAll(arrivedBottom.stream().map(s -> new Square(0, 0, s.color, 0, null, false)).toList());
         }
 
         // Gentle randomization of spawn intervals to make flow less uniform
@@ -561,8 +582,7 @@ public class BallFlowApp extends Application {
 
         g.fillText(String.format("Failure rate: %.1f%% (threshold %.0f%%)", failureRate, failureRateThreshold), x, y + 16);
         g.fillText(String.format("Buffered calls: %.0f  Not permitted: %.0f  Slow rate: %.1f%%", buffered, notPermitted, slowCallRate), x, y + 32);
-        int inFlight = (int) inPipeL2R.stream().filter(b -> b.cbChecked).count();
-        g.fillText(String.format("In-flight (pool): %d / %d", inFlight, MAX_IN_FLIGHT), x, y + 48);
+        g.fillText(String.format("In-flight (pool): %d / %d", currentInFlight, MAX_IN_FLIGHT), x, y + 48);
         g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 64);
 
         // Bar showing failure rate vs threshold
