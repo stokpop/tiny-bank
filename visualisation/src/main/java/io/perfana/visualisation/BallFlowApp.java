@@ -47,6 +47,8 @@ public class BallFlowApp extends Application {
 
     // Position of the Circuit Breaker icon inside the top pipe (fraction from left edge of pipe)
     private static final double CB_POS_FRACTION = 0.35; // 35% into the pipe
+    // Simulated connection pool capacity: max concurrent in-flight calls (after CB permitted)
+    private static final int MAX_IN_FLIGHT = 6;
 
     private final Random random = new Random();
 
@@ -162,25 +164,32 @@ public class BallFlowApp extends Application {
             double newX = b.x + b.speed * deltaSec;
             Ball moved = new Ball(newX, b.y + wobble(deltaSec), b.color, b.speed, b.startNs, b.cbChecked, b.shortCircuited);
 
-            // At CB position, if not yet checked, decide permission
+            // At CB position, if not yet checked, decide permission with connection pool gating
             if (!b.cbChecked && newX >= cbX) {
-                try {
-                    circuitBreaker.acquirePermission();
-                    // permitted: mark as checked and continue as ball
-                    moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startNs, true, false);
-                } catch (CallNotPermittedException e) {
-                    // denied: convert to orange square in the top pipe and remove ball
-                    shortCircuitedCount++;
-                    addOutcome(Outcome.NOT_PERMITTED);
-                    inPipeL2RShort.add(new Square(newX, moved.y, SHORT_CIRCUIT_COLOR, moved.speed));
-                    toRemoveFromPipe.add(b);
-                    continue; // don't keep the ball
+                int inFlight = (int) inPipeL2R.stream().filter(bb -> bb.cbChecked).count();
+                if (inFlight >= MAX_IN_FLIGHT) {
+                    // No capacity: hold at CB icon; try again next frame
+                    moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startNs, false, false);
+                } else {
+                    try {
+                        circuitBreaker.acquirePermission();
+                        // permitted: mark as checked and continue as ball
+                        moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startNs, true, false);
+                    } catch (CallNotPermittedException e) {
+                        // denied: convert to orange square at CB and send back immediately via bottom pipe
+                        shortCircuitedCount++;
+                        addOutcome(Outcome.NOT_PERMITTED);
+                        double bottomCenterY = HEIGHT / 2.0 + 60 + 20; // center of bottom pipe
+                        inPipeR2L.add(new Square(cbX, bottomCenterY, SHORT_CIRCUIT_COLOR, moved.speed));
+                        toRemoveFromPipe.add(b);
+                        continue; // don't keep the ball in top pipe
+                    }
                 }
             }
 
             inPipeL2R.set(i, moved);
 
-            if (newX >= rightBoxX + BOX_WIDTH / 2.0 - BALL_RADIUS) {
+            if (moved.x >= rightBoxX + BOX_WIDTH / 2.0 - BALL_RADIUS) {
                 arrivedTop.add(moved);
             }
         }
@@ -394,6 +403,10 @@ public class BallFlowApp extends Application {
     }
 
     private void addOutcome(Outcome outcome) {
+        // Exclude NOT_PERMITTED from the visual failure buffer
+        if (outcome == Outcome.NOT_PERMITTED) {
+            return;
+        }
         recentOutcomes.addLast(outcome);
         while (recentOutcomes.size() > bufferVisualSize) {
             recentOutcomes.removeFirst();
@@ -489,11 +502,13 @@ public class BallFlowApp extends Application {
 
         g.fillText(String.format("Failure rate: %.1f%% (threshold %.0f%%)", failureRate, failureRateThreshold), x, y + 16);
         g.fillText(String.format("Buffered calls: %.0f  Not permitted: %.0f  Slow rate: %.1f%%", buffered, notPermitted, slowCallRate), x, y + 32);
-        g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 48);
+        int inFlight = (int) inPipeL2R.stream().filter(b -> b.cbChecked).count();
+        g.fillText(String.format("In-flight (pool): %d / %d", inFlight, MAX_IN_FLIGHT), x, y + 48);
+        g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 64);
 
         // Bar showing failure rate vs threshold
         double barX = x;
-        double barY = y + 60;
+        double barY = y + 76;
         double barW = 220;
         double barH = 10;
         g.setFill(Color.color(1,1,1,0.15));

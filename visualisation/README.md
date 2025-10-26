@@ -5,10 +5,10 @@ A tiny JavaFX application that visualizes a Resilience4j CircuitBreaker as a flo
 - TOP pipe carries calls to the right box (simulated remote service)
 - A Circuit Breaker icon sits inside the TOP pipe; at this point each ball is checked by the CB
 - If the CB PERMITS, the ball continues and on arrival becomes a filled square: green on success, red on failure
-- If the CB is OPEN (NOT PERMITTED), the ball is converted at the icon into an orange square which then continues through the pipe to the right box
+- If the CB is OPEN (NOT PERMITTED), the ball is converted at the icon into an orange square and is immediately sent back via the BOTTOM pipe to the left box (it does not go to the right box)
 - Squares flow back via the BOTTOM pipe to the left box
 
-A HUD overlays the canvas showing breaker state, failure rate vs threshold, buffered calls, not-permitted count, and the current simulated failure probability. Next to the HUD, a small buffer panel visualizes the latest outcomes in the sliding window: green=success, red=failure, orange=not permitted.
+A HUD overlays the canvas showing breaker state, failure rate vs threshold, buffered calls, not-permitted count, and the current simulated failure probability. Next to the HUD, a small buffer panel visualizes the latest permitted outcomes in the sliding window: green=success, red=failure. Not-permitted (orange) calls are excluded from this buffer.
 
 ## Prerequisites
 - JDK 21+
