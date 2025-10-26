@@ -45,9 +45,12 @@ public class BallFlowApp extends Application {
 
     private static final Color SHORT_CIRCUIT_COLOR = Color.web("#f59e0b"); // orange
 
+    // Position of the Circuit Breaker icon inside the top pipe (fraction from left edge of pipe)
+    private static final double CB_POS_FRACTION = 0.35; // 35% into the pipe
+
     private final Random random = new Random();
 
-    private record Ball(double x, double y, Color color, double speed, long startNs) {}
+    private record Ball(double x, double y, Color color, double speed, long startNs, boolean cbChecked, boolean shortCircuited) {}
     private record Square(double x, double y, Color color, double speed) {}
 
     // CircuitBreaker model
@@ -56,6 +59,10 @@ public class BallFlowApp extends Application {
     private long lastProbUpdateNs = 0L;
     private long shortCircuitedCount = 0L;
     private float failureRateThreshold = 50.0f;
+    private int bufferVisualSize = 5; // visualize last N outcomes (align with sliding window)
+
+    private enum Outcome { SUCCESS, FAILURE, NOT_PERMITTED }
+    private final Deque<Outcome> recentOutcomes = new ArrayDeque<>();
 
     // Left box contents: balls (original) and squares (returned)
     private final Deque<Ball> leftBalls = new ArrayDeque<>();
@@ -65,7 +72,8 @@ public class BallFlowApp extends Application {
     private final Deque<Square> rightSquares = new ArrayDeque<>();
 
     // Pipes
-    private final List<Ball> inPipeL2R = new ArrayList<>(); // top pipe: left -> right
+    private final List<Ball> inPipeL2R = new ArrayList<>(); // top pipe: left -> right (balls before CB decision)
+    private final List<Square> inPipeL2RShort = new ArrayList<>(); // top pipe: left -> right (orange short-circuited squares)
     private final List<Square> inPipeR2L = new ArrayList<>(); // bottom pipe: right -> left
 
     private long lastSpawnL2RNs = 0;
@@ -91,7 +99,7 @@ public class BallFlowApp extends Application {
         CircuitBreakerConfig cbConfig = CircuitBreakerConfig.custom()
                 .failureRateThreshold(50.0f)
                 .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
-                .slidingWindowSize(20)
+                .slidingWindowSize(5)
                 .minimumNumberOfCalls(10)
                 .waitDurationInOpenState(Duration.ofSeconds(3))
                 .permittedNumberOfCallsInHalfOpenState(5)
@@ -100,8 +108,8 @@ public class BallFlowApp extends Application {
         CircuitBreakerRegistry registry = CircuitBreakerRegistry.of(cbConfig);
         circuitBreaker = registry.circuitBreaker("visual-cb");
 
-        // Pre-fill left box with some balls
-        for (int i = 0; i < 30; i++) {
+        // Pre-fill left box with more balls for a denser start
+        for (int i = 0; i < 80; i++) {
             leftBalls.add(createRandomBallInLeftBox());
         }
 
@@ -136,43 +144,84 @@ public class BallFlowApp extends Application {
             if (next != null) {
                 double pipeEntryX = leftBoxX + BOX_WIDTH + (PIPE_WIDTH / 2.0);
                 double pipeEntryY = HEIGHT / 2.0 - 20 + 20; // center of top pipe
-                try {
-                    circuitBreaker.acquirePermission();
-                    inPipeL2R.add(new Ball(pipeEntryX, pipeEntryY, next.color, 80 + random.nextDouble() * 120, now));
-                } catch (CallNotPermittedException e) {
-                    // Short-circuited: represent as orange square appearing in the right box
-                    shortCircuitedCount++;
-                    rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0));
-                }
+                inPipeL2R.add(new Ball(pipeEntryX, pipeEntryY, next.color, 80 + random.nextDouble() * 120, now, false, false));
             }
             lastSpawnL2RNs = now;
         }
 
-        // Move balls in the top pipe to the right; on arrival apply CircuitBreaker outcome
+        // Move balls in the top pipe to the right; perform CB decision mid-pipe; on arrival apply outcome
         List<Ball> arrivedTop = new ArrayList<>();
+        List<Ball> toRemoveFromPipe = new ArrayList<>();
+
+        double pipeTopX = leftBoxX + BOX_WIDTH;
+        double pipeLength = (WIDTH - BOX_MARGIN - BOX_WIDTH) - pipeTopX; // rightBoxX - pipeTopX
+        double cbX = pipeTopX + CB_POS_FRACTION * pipeLength;
+
         for (int i = 0; i < inPipeL2R.size(); i++) {
             Ball b = inPipeL2R.get(i);
             double newX = b.x + b.speed * deltaSec;
-            Ball moved = new Ball(newX, b.y + wobble(deltaSec), b.color, b.speed, b.startNs);
+            Ball moved = new Ball(newX, b.y + wobble(deltaSec), b.color, b.speed, b.startNs, b.cbChecked, b.shortCircuited);
+
+            // At CB position, if not yet checked, decide permission
+            if (!b.cbChecked && newX >= cbX) {
+                try {
+                    circuitBreaker.acquirePermission();
+                    // permitted: mark as checked and continue as ball
+                    moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startNs, true, false);
+                } catch (CallNotPermittedException e) {
+                    // denied: convert to orange square in the top pipe and remove ball
+                    shortCircuitedCount++;
+                    addOutcome(Outcome.NOT_PERMITTED);
+                    inPipeL2RShort.add(new Square(newX, moved.y, SHORT_CIRCUIT_COLOR, moved.speed));
+                    toRemoveFromPipe.add(b);
+                    continue; // don't keep the ball
+                }
+            }
+
             inPipeL2R.set(i, moved);
 
             if (newX >= rightBoxX + BOX_WIDTH / 2.0 - BALL_RADIUS) {
                 arrivedTop.add(moved);
             }
         }
+        if (!toRemoveFromPipe.isEmpty()) {
+            inPipeL2R.removeAll(toRemoveFromPipe);
+        }
+
         if (!arrivedTop.isEmpty()) {
             inPipeL2R.removeAll(arrivedTop);
             for (Ball b : arrivedTop) {
                 long durationNs = now - b.startNs;
-                // Simulate remote call outcome and record in CB
+                // Only permitted balls reach here; simulate remote call outcome and record in CB
                 boolean failed = random.nextDouble() < failureProbability;
                 if (failed) {
                     circuitBreaker.onError(durationNs, TimeUnit.NANOSECONDS, new RuntimeException("simulated-failure"));
                     rightSquares.add(new Square(0, 0, Color.web("#ef4444"), 0));
+                    addOutcome(Outcome.FAILURE);
                 } else {
                     circuitBreaker.onSuccess(durationNs, TimeUnit.NANOSECONDS);
                     rightSquares.add(new Square(0, 0, b.color, 0));
+                    addOutcome(Outcome.SUCCESS);
                 }
+            }
+        }
+
+        // Move short-circuited squares along the top pipe to the right
+        List<Square> arrivedShort = new ArrayList<>();
+        for (int i = 0; i < inPipeL2RShort.size(); i++) {
+            Square s = inPipeL2RShort.get(i);
+            double newX = s.x + s.speed * deltaSec;
+            Square moved = new Square(newX, s.y + wobble(deltaSec), s.color, s.speed);
+            inPipeL2RShort.set(i, moved);
+            if (newX >= rightBoxX + BOX_WIDTH / 2.0 - BALL_RADIUS) {
+                arrivedShort.add(moved);
+            }
+        }
+        if (!arrivedShort.isEmpty()) {
+            inPipeL2RShort.removeAll(arrivedShort);
+            // deposit orange squares into right box
+            for (Square s : arrivedShort) {
+                rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0));
             }
         }
 
@@ -280,12 +329,75 @@ public class BallFlowApp extends Application {
         for (Ball b : inPipeL2R) {
             drawBall(g, b.x, b.y, b.color);
         }
+        for (Square s : inPipeL2RShort) {
+            drawSquare(g, s.x, s.y, s.color);
+        }
         for (Square s : inPipeR2L) {
             drawSquare(g, s.x, s.y, s.color);
         }
 
+        // Draw Circuit Breaker icon in top pipe
+        drawCircuitBreakerIcon(g, pipeTopX, pipeTopY, pipeLength, pipeHeight);
+
         // HUD overlay with CircuitBreaker state and failure rate
         drawHud(g);
+        drawBufferPanel(g);
+    }
+
+    private void drawCircuitBreakerIcon(GraphicsContext g, double pipeTopX, double pipeTopY, double pipeLength, double pipeHeight) {
+        double cbX = pipeTopX + CB_POS_FRACTION * pipeLength;
+        double cbY = pipeTopY + pipeHeight / 2.0;
+        double w = 36, h = 20;
+
+        Color stateColor;
+        switch (circuitBreaker.getState()) {
+            case OPEN -> stateColor = Color.web("#ef4444");
+            case HALF_OPEN -> stateColor = Color.web("#f59e0b");
+            default -> stateColor = Color.web("#22c55e"); // CLOSED and others
+        }
+        g.setFill(Color.color(0,0,0,0.35));
+        g.fillRoundRect(cbX - w/2 - 3, cbY - h/2 - 3, w + 6, h + 6, 8, 8);
+
+        g.setFill(Color.color(0.1,0.1,0.1,0.9));
+        g.fillRoundRect(cbX - w/2, cbY - h/2, w, h, 6, 6);
+        g.setStroke(stateColor);
+        g.setLineWidth(2);
+        g.strokeRoundRect(cbX - w/2, cbY - h/2, w, h, 6, 6);
+
+        g.setFill(stateColor);
+        g.fillText("CB", cbX - 8, cbY + 4);
+    }
+
+    private void drawBufferPanel(GraphicsContext g) {
+        // Panel near HUD (top-left)
+        double x = 260, y = 14;
+        g.setFill(Color.color(1,1,1,0.9));
+        g.fillText("Buffer (latest " + bufferVisualSize + ")", x, y);
+        double cell = 10;
+        double pad = 2;
+        double startY = y + 6;
+        int idx = 0;
+        for (Outcome o : recentOutcomes) {
+            double cx = x + (idx % bufferVisualSize) * (cell + pad);
+            double cy = startY + 10;
+            Color c = switch (o) {
+                case SUCCESS -> Color.web("#22c55e");
+                case FAILURE -> Color.web("#ef4444");
+                case NOT_PERMITTED -> SHORT_CIRCUIT_COLOR;
+            };
+            g.setFill(c);
+            g.fillRect(cx, cy, cell, cell);
+            g.setStroke(Color.color(0,0,0,0.4));
+            g.strokeRect(cx, cy, cell, cell);
+            idx++;
+        }
+    }
+
+    private void addOutcome(Outcome outcome) {
+        recentOutcomes.addLast(outcome);
+        while (recentOutcomes.size() > bufferVisualSize) {
+            recentOutcomes.removeFirst();
+        }
     }
 
     private void drawMixedInBox(GraphicsContext g, double boxX, double boxY, Deque<Ball> balls, Deque<Square> squares) {
@@ -402,7 +514,7 @@ public class BallFlowApp extends Application {
         double saturation = 0.65 + random.nextDouble() * 0.3; // [0.65, 0.95)
         double brightness = 0.80 + random.nextDouble() * 0.2; // [0.80, 1.0)
         Color color = Color.hsb(hueDeg, saturation, brightness);
-        return new Ball(0, 0, color, 0, System.nanoTime());
+        return new Ball(0, 0, color, 0, System.nanoTime(), false, false);
     }
 
     public static void main(String[] args) {
