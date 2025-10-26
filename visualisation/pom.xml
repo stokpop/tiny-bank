@@ -44,7 +44,13 @@
             <version>${javafx.version}</version>
             <classifier>${javafx.platform}</classifier>
         </dependency>
-    </dependencies>
+    <!-- Resilience4j for CircuitBreaker modeling -->
+    <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-circuitbreaker</artifactId>
+        <version>2.2.0</version>
+    </dependency>
+</dependencies>
 
     <build>
         <plugins>

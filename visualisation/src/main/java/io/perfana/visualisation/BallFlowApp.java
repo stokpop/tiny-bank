@@ -1,5 +1,9 @@
 package io.perfana.visualisation;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.scene.Scene;
@@ -9,15 +13,21 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 /**
- * JavaFX visualisation showing balls moving from the left box through the top pipe to the right box,
- * where they turn into squares. Squares are then sent back through a second (bottom) pipe to the left box.
+ * JavaFX visualisation showing a Resilience4j CircuitBreaker model.
+ * Left box creates requests (balls) going through the TOP pipe to a simulated remote service.
+ * On arrival, the CircuitBreaker records success (green square) or failure (red square).
+ * When the breaker is OPEN, calls are short-circuited (orange squares) and do not traverse the pipe.
+ * Squares return via the BOTTOM pipe to the left box.
+ * A HUD shows breaker state and failure rate over time.
  */
 public class BallFlowApp extends Application {
 
@@ -33,10 +43,19 @@ public class BallFlowApp extends Application {
     private static final double BALL_RADIUS = 8;
     private static final double SQUARE_SIZE = BALL_RADIUS * 2;
 
+    private static final Color SHORT_CIRCUIT_COLOR = Color.web("#f59e0b"); // orange
+
     private final Random random = new Random();
 
-    private record Ball(double x, double y, Color color, double speed) {}
+    private record Ball(double x, double y, Color color, double speed, long startNs) {}
     private record Square(double x, double y, Color color, double speed) {}
+
+    // CircuitBreaker model
+    private CircuitBreaker circuitBreaker;
+    private double failureProbability = 0.2; // dynamic over time
+    private long lastProbUpdateNs = 0L;
+    private long shortCircuitedCount = 0L;
+    private float failureRateThreshold = 50.0f;
 
     // Left box contents: balls (original) and squares (returned)
     private final Deque<Ball> leftBalls = new ArrayDeque<>();
@@ -57,7 +76,7 @@ public class BallFlowApp extends Application {
 
     @Override
     public void start(Stage stage) {
-        stage.setTitle("Tiny Bank - Flow Visualisation");
+        stage.setTitle("Tiny Bank - Circuit Breaker Visualisation");
 
         BorderPane root = new BorderPane();
         Canvas canvas = new Canvas(WIDTH, HEIGHT);
@@ -67,6 +86,19 @@ public class BallFlowApp extends Application {
         stage.setScene(scene);
         stage.setResizable(false);
         stage.show();
+
+        // CircuitBreaker configuration and instance
+        CircuitBreakerConfig cbConfig = CircuitBreakerConfig.custom()
+                .failureRateThreshold(50.0f)
+                .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                .slidingWindowSize(20)
+                .minimumNumberOfCalls(10)
+                .waitDurationInOpenState(Duration.ofSeconds(3))
+                .permittedNumberOfCallsInHalfOpenState(5)
+                .automaticTransitionFromOpenToHalfOpenEnabled(true)
+                .build();
+        CircuitBreakerRegistry registry = CircuitBreakerRegistry.of(cbConfig);
+        circuitBreaker = registry.circuitBreaker("visual-cb");
 
         // Pre-fill left box with some balls
         for (int i = 0; i < 30; i++) {
@@ -104,17 +136,24 @@ public class BallFlowApp extends Application {
             if (next != null) {
                 double pipeEntryX = leftBoxX + BOX_WIDTH + (PIPE_WIDTH / 2.0);
                 double pipeEntryY = HEIGHT / 2.0 - 20 + 20; // center of top pipe
-                inPipeL2R.add(new Ball(pipeEntryX, pipeEntryY, next.color, 80 + random.nextDouble() * 120));
+                try {
+                    circuitBreaker.acquirePermission();
+                    inPipeL2R.add(new Ball(pipeEntryX, pipeEntryY, next.color, 80 + random.nextDouble() * 120, now));
+                } catch (CallNotPermittedException e) {
+                    // Short-circuited: represent as orange square appearing in the right box
+                    shortCircuitedCount++;
+                    rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0));
+                }
             }
             lastSpawnL2RNs = now;
         }
 
-        // Move balls in the top pipe to the right; on arrival convert to squares in right box
+        // Move balls in the top pipe to the right; on arrival apply CircuitBreaker outcome
         List<Ball> arrivedTop = new ArrayList<>();
         for (int i = 0; i < inPipeL2R.size(); i++) {
             Ball b = inPipeL2R.get(i);
             double newX = b.x + b.speed * deltaSec;
-            Ball moved = new Ball(newX, b.y + wobble(deltaSec), b.color, b.speed);
+            Ball moved = new Ball(newX, b.y + wobble(deltaSec), b.color, b.speed, b.startNs);
             inPipeL2R.set(i, moved);
 
             if (newX >= rightBoxX + BOX_WIDTH / 2.0 - BALL_RADIUS) {
@@ -124,12 +163,16 @@ public class BallFlowApp extends Application {
         if (!arrivedTop.isEmpty()) {
             inPipeL2R.removeAll(arrivedTop);
             for (Ball b : arrivedTop) {
-                // Convert arriving balls into squares in the right box
-                // ~10% chance to turn into a red square; otherwise keep the same green shade
-                Color squareColor = (random.nextDouble() < 0.30)
-                        ? Color.web("#ef4444") // red
-                        : b.color;
-                rightSquares.add(new Square(0, 0, squareColor, 0));
+                long durationNs = now - b.startNs;
+                // Simulate remote call outcome and record in CB
+                boolean failed = random.nextDouble() < failureProbability;
+                if (failed) {
+                    circuitBreaker.onError(durationNs, TimeUnit.NANOSECONDS, new RuntimeException("simulated-failure"));
+                    rightSquares.add(new Square(0, 0, Color.web("#ef4444"), 0));
+                } else {
+                    circuitBreaker.onSuccess(durationNs, TimeUnit.NANOSECONDS);
+                    rightSquares.add(new Square(0, 0, b.color, 0));
+                }
             }
         }
 
@@ -167,6 +210,14 @@ public class BallFlowApp extends Application {
         }
         if (random.nextDouble() < 0.01) {
             spawnIntervalR2LNs = (long) (300_000_000L + random.nextDouble() * 600_000_000L);
+        }
+
+        // Slowly vary failure probability over time (simulate bad periods)
+        if (now - lastProbUpdateNs > 200_000_000L) { // update ~5 times/sec
+            double t = (now / 1_000_000_000.0);
+            // base 0.2, oscillate +/-0.25 with a slow sine wave
+            failureProbability = clamp(0.0, 1.0, 0.2 + 0.25 * Math.sin(t * 0.5) + 0.05 * Math.sin(t * 2.7));
+            lastProbUpdateNs = now;
         }
     }
 
@@ -232,6 +283,9 @@ public class BallFlowApp extends Application {
         for (Square s : inPipeR2L) {
             drawSquare(g, s.x, s.y, s.color);
         }
+
+        // HUD overlay with CircuitBreaker state and failure rate
+        drawHud(g);
     }
 
     private void drawMixedInBox(GraphicsContext g, double boxX, double boxY, Deque<Ball> balls, Deque<Square> squares) {
@@ -310,13 +364,45 @@ public class BallFlowApp extends Application {
         g.strokeRect(x - SQUARE_SIZE / 2.0, y - SQUARE_SIZE / 2.0, SQUARE_SIZE, SQUARE_SIZE);
     }
 
+    private void drawHud(GraphicsContext g) {
+        double x = 20, y = 18;
+        g.setFill(Color.color(1,1,1,0.9));
+        g.fillText("CircuitBreaker: " + circuitBreaker.getState(), x, y);
+
+        var metrics = circuitBreaker.getMetrics();
+        float failureRate = metrics.getFailureRate();
+        float buffered = metrics.getNumberOfBufferedCalls();
+        float notPermitted = metrics.getNumberOfNotPermittedCalls();
+        float slowCallRate = metrics.getSlowCallRate();
+
+        g.fillText(String.format("Failure rate: %.1f%% (threshold %.0f%%)", failureRate, failureRateThreshold), x, y + 16);
+        g.fillText(String.format("Buffered calls: %.0f  Not permitted: %.0f  Slow rate: %.1f%%", buffered, notPermitted, slowCallRate), x, y + 32);
+        g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 48);
+
+        // Bar showing failure rate vs threshold
+        double barX = x;
+        double barY = y + 60;
+        double barW = 220;
+        double barH = 10;
+        g.setFill(Color.color(1,1,1,0.15));
+        g.fillRect(barX, barY, barW, barH);
+        double frac = clamp(0, 1, failureRate / 100.0);
+        Color barColor = failureRate >= failureRateThreshold ? Color.web("#ef4444") : Color.web("#22c55e");
+        g.setFill(barColor);
+        g.fillRect(barX, barY, barW * frac, barH);
+    }
+
+    private static double clamp(double min, double max, double v) {
+        return Math.max(min, Math.min(max, v));
+    }
+
     private Ball createRandomBallInLeftBox() {
         // Generate only shades of green: restrict hue to the green band (~100°–180°)
         double hueDeg = 100 + random.nextDouble() * 80; // [100, 180)
         double saturation = 0.65 + random.nextDouble() * 0.3; // [0.65, 0.95)
         double brightness = 0.80 + random.nextDouble() * 0.2; // [0.80, 1.0)
         Color color = Color.hsb(hueDeg, saturation, brightness);
-        return new Ball(0, 0, color, 0);
+        return new Ball(0, 0, color, 0, System.nanoTime());
     }
 
     public static void main(String[] args) {

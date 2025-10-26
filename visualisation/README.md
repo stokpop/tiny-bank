@@ -1,6 +1,13 @@
-# Visualisation: Balls and Squares Through Two Pipes
+# Visualisation: Resilience4j Circuit Breaker Model
 
-A tiny JavaFX application that shows a canvas with small balls in a left box flowing one-by-one through a TOP pipe into a right box. In the right box, balls are transformed into squares. Squares then travel back through a BOTTOM pipe to the left box.
+A tiny JavaFX application that visualizes a Resilience4j CircuitBreaker as a flow of calls:
+- Left box produces hollow green balls (requests)
+- TOP pipe carries permitted calls to the right box (simulated remote service)
+- On arrival, the CircuitBreaker records success (green filled square) or failure (red filled square)
+- When the breaker is OPEN, calls are short-circuited: an orange square appears directly in the right box (no travel)
+- Squares flow back via the BOTTOM pipe to the left box
+
+A HUD overlays the canvas showing breaker state, failure rate vs threshold, buffered calls, not-permitted count, and the current simulated failure probability.
 
 ## Prerequisites
 - JDK 21+
