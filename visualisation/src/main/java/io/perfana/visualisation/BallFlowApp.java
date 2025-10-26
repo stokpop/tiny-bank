@@ -55,6 +55,7 @@ public class BallFlowApp extends Application {
     private record Ball(double x, double y, Color color, double speed, long startMs, boolean cbChecked, boolean shortCircuited) {}
     private record Square(double x, double y, Color color, double speed, Outcome outcome, boolean occupiesSlot) {}
     private record ShortCircuitTransition(double x, double yStart, double yEnd, double speed, long startMs, long durationMs, double currentY) {}
+    private record RightBoxMorph(double xStart, double yStart, double xEnd, double yEnd, Color ballColor, Color squareColor, Outcome outcome, boolean occupiesSlot, long startMs, long durationMs, double progress) {}
 
     // CircuitBreaker model
     private CircuitBreaker circuitBreaker;
@@ -84,6 +85,9 @@ public class BallFlowApp extends Application {
     
     // Visual transition of NOT_PERMITTED: ball morphs to orange square inside CB column
     private final List<ShortCircuitTransition> shortCircuitTransitions = new ArrayList<>();
+
+    // Right box morphs: permitted ball arriving morphs into a filled square at its grid slot
+    private final List<RightBoxMorph> rightBoxMorphs = new ArrayList<>();
 
     private long lastSpawnL2RNs = 0;
     private long spawnIntervalL2RNs = 500L; // 0.5s default, now in milliseconds
@@ -217,15 +221,33 @@ public class BallFlowApp extends Application {
                 long durationMs = now - b.startMs;
                 // Only permitted balls reach here; simulate remote call outcome and record in CB
                 boolean failed = random.nextDouble() < failureProbability;
+                Outcome out;
+                Color squareColor;
                 if (failed) {
                     circuitBreaker.onError(durationMs, TimeUnit.MILLISECONDS, new RuntimeException("simulated-failure"));
-                    // Store failure outcome with the square; it still occupies the pool slot until it crosses the CB on return
-                    rightSquares.add(new Square(0, 0, Color.web("#ef4444"), 0, Outcome.FAILURE, true));
+                    out = Outcome.FAILURE;
+                    squareColor = Color.web("#ef4444");
                 } else {
                     circuitBreaker.onSuccess(durationMs, TimeUnit.MILLISECONDS);
-                    // Store success outcome with the square; it still occupies the pool slot until it crosses the CB on return
-                    rightSquares.add(new Square(0, 0, b.color, 0, Outcome.SUCCESS, true));
+                    out = Outcome.SUCCESS;
+                    squareColor = b.color;
                 }
+                // Create a morph animation in the right box from incoming ball position to the reserved grid slot
+                // Compute right box geometry and target slot based on current squares and pending morphs
+                double rightBoxY = (HEIGHT - BOX_HEIGHT) / 2.0;
+                int cols = (int) Math.max(1, Math.floor((BOX_WIDTH - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
+                int rows = (int) Math.max(1, Math.floor((BOX_HEIGHT - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
+                int index = rightSquares.size() + rightBoxMorphs.size();
+                // Place at the front of the return pipeline: bottom row first, then grow left→right and upwards
+                int rowFromBottom = index / cols; // 0 = bottom row in the box
+                int row = Math.min(rows - 1, rows - 1 - rowFromBottom);
+                int col = index % cols;
+                double targetX = rightBoxX + BALL_RADIUS + 6 + col * (BALL_RADIUS * 2 + 4);
+                double targetY = rightBoxY + BALL_RADIUS + 6 + row * (BALL_RADIUS * 2 + 4);
+                double startX = Math.min(b.x, rightBoxX + BOX_WIDTH - BALL_RADIUS - 6); // keep inside box edge
+                double startY = Math.min(Math.max(b.y, rightBoxY + BALL_RADIUS + 6), rightBoxY + BOX_HEIGHT - BALL_RADIUS - 6);
+                long morphDuration = 240L;
+                rightBoxMorphs.add(new RightBoxMorph(startX, startY, targetX, targetY, b.color, squareColor, out, true, now, morphDuration, 0.0));
             }
         }
 
@@ -268,6 +290,26 @@ public class BallFlowApp extends Application {
                     inPipeR2L.add(new Square(t.x, t.yEnd, SHORT_CIRCUIT_COLOR, t.speed, Outcome.NOT_PERMITTED, false));
                 }
                 shortCircuitTransitions.removeAll(finished);
+            }
+        }
+
+        // Advance right-box morphs and finalize into rightSquares when completed
+        if (!rightBoxMorphs.isEmpty()) {
+            List<RightBoxMorph> done = new ArrayList<>();
+            for (int i = 0; i < rightBoxMorphs.size(); i++) {
+                RightBoxMorph m = rightBoxMorphs.get(i);
+                double elapsed = now - m.startMs;
+                double p = clamp(0.0, 1.0, elapsed / (double) m.durationMs);
+                rightBoxMorphs.set(i, new RightBoxMorph(m.xStart, m.yStart, m.xEnd, m.yEnd, m.ballColor, m.squareColor, m.outcome, m.occupiesSlot, m.startMs, m.durationMs, p));
+                if (p >= 1.0) {
+                    done.add(rightBoxMorphs.get(i));
+                }
+            }
+            if (!done.isEmpty()) {
+                for (RightBoxMorph m : done) {
+                    rightSquares.add(new Square(0, 0, m.squareColor, 0, m.outcome, m.occupiesSlot));
+                }
+                rightBoxMorphs.removeAll(done);
             }
         }
 
@@ -399,6 +441,8 @@ public class BallFlowApp extends Application {
         // Draw contents in boxes
         drawMixedInBox(g, leftBoxX, leftBoxY, leftBalls, leftSquares);
         drawSquaresInBox(g, rightBoxX, rightBoxY, rightSquares);
+        // Draw right-box morphs on top for visibility
+        drawRightBoxMorphs(g, rightBoxX, rightBoxY);
 
         // Draw moving shapes in pipes
         for (Ball b : inPipeL2R) {
@@ -541,17 +585,46 @@ public class BallFlowApp extends Application {
     }
 
     private void drawSquaresInBox(GraphicsContext g, double boxX, double boxY, Deque<Square> squares) {
+        // Draw squares starting from the BOTTOM row, growing LEFT → RIGHT; when a row fills, continue one row up.
         int cols = (int) Math.max(1, Math.floor((BOX_WIDTH - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
         int rows = (int) Math.max(1, Math.floor((BOX_HEIGHT - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
         int index = 0;
         for (Square s : squares) {
-            int row = index / cols;
+            int rowFromBottom = index / cols; // 0 = bottom row
+            if (rowFromBottom >= rows) break; // out of vertical space
+            int row = rows - 1 - rowFromBottom; // convert to top-based index for y
             int col = index % cols;
-            if (row >= rows) break;
             double x = boxX + BALL_RADIUS + 6 + col * (BALL_RADIUS * 2 + 4);
             double y = boxY + BALL_RADIUS + 6 + row * (BALL_RADIUS * 2 + 4);
             drawSquare(g, x, y, s.color);
             index++;
+        }
+    }
+
+    private void drawRightBoxMorphs(GraphicsContext g, double rightBoxX, double rightBoxY) {
+        if (rightBoxMorphs.isEmpty()) return;
+        for (RightBoxMorph m : rightBoxMorphs) {
+            double p = clamp(0.0, 1.0, m.progress);
+            // Position interpolation
+            double x = m.xStart + (m.xEnd - m.xStart) * p;
+            double y = m.yStart + (m.yEnd - m.yStart) * p;
+
+            // Cross-fade from hollow ball to filled square
+            double ballAlpha = 1.0 - p;
+            double squareAlpha = p;
+
+            // Draw ghost path line subtly (optional): skipped for minimalism
+
+            // Draw ball outline with fading alpha
+            g.setGlobalAlpha(ballAlpha);
+            drawBall(g, x, y, m.ballColor);
+
+            // Draw filling square with increasing alpha and slight corner rounding for a softer morph
+            g.setGlobalAlpha(squareAlpha);
+            drawSquare(g, x, y, m.squareColor);
+
+            // Reset alpha
+            g.setGlobalAlpha(1.0);
         }
     }
 

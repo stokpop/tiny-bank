@@ -4,7 +4,7 @@ A tiny JavaFX application that visualizes a Resilience4j CircuitBreaker as a flo
 - Left box produces hollow green balls (requests); we start with more balls for a denser initial flow
 - TOP pipe carries calls to the right box (simulated remote service)
 - A tall Circuit Breaker column spans both pipes; at this point each ball is checked by the CB
-- If the CB PERMITS, the ball continues and on arrival becomes a filled square: green on success, red on failure
+- If the CB PERMITS, the ball continues and on arrival morphs smoothly into a filled square at its slot in the right box: green on success, red on failure
 - If the CB is OPEN (NOT PERMITTED), the ball smoothly morphs at the CB column into an orange square (animated inside the CB) and is then sent back via the BOTTOM pipe to the left box (it does not go to the right box)
 - Squares flow back via the BOTTOM pipe to the left box
 
@@ -49,7 +49,7 @@ java -jar target/visualisation-1.0.0-SNAPSHOT.jar
 ## What you see
 - Left box pre-filled with green-shaded balls (hollow) and returning squares
 - A top pipe connecting the left box to the right box; balls flow through it
-- In the right box, balls are converted into filled squares. About 10% become red squares; the rest keep their original green shade
+- In the right box, balls are converted into filled squares. About 10% become red squares; the rest keep their original green shade. New: Squares in the right box fill from the bottom row upward (front of the return pipeline), growing left→right, so buffering appears next to the bottom pipe entry.
 - A bottom pipe sends squares back to the left box where squares stack from the bottom upward
 - Mild jitter/wobble animation and randomized spawn intervals for a natural feel
 
