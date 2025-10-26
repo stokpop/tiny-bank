@@ -52,13 +52,13 @@ public class BallFlowApp extends Application {
 
     private final Random random = new Random();
 
-    private record Ball(double x, double y, Color color, double speed, long startNs, boolean cbChecked, boolean shortCircuited) {}
+    private record Ball(double x, double y, Color color, double speed, long startMs, boolean cbChecked, boolean shortCircuited) {}
     private record Square(double x, double y, Color color, double speed) {}
 
     // CircuitBreaker model
     private CircuitBreaker circuitBreaker;
     private double failureProbability = 0.2; // dynamic over time
-    private long lastProbUpdateNs = 0L;
+    private long lastProbUpdateMs = 0L;
     private long shortCircuitedCount = 0L;
     private float failureRateThreshold = 50.0f;
     private int bufferVisualSize = 5; // visualize last N outcomes (align with sliding window)
@@ -79,10 +79,10 @@ public class BallFlowApp extends Application {
     private final List<Square> inPipeR2L = new ArrayList<>(); // bottom pipe: right -> left
 
     private long lastSpawnL2RNs = 0;
-    private long spawnIntervalL2RNs = 500_000_000L; // 0.5s default
+    private long spawnIntervalL2RNs = 500L; // 0.5s default, now in milliseconds
 
     private long lastSpawnR2LNs = 0;
-    private long spawnIntervalR2LNs = 600_000_000L; // 0.6s default
+    private long spawnIntervalR2LNs = 600L; // 0.6s default, now in milliseconds
 
     @Override
     public void start(Stage stage) {
@@ -118,17 +118,18 @@ public class BallFlowApp extends Application {
         GraphicsContext g = canvas.getGraphicsContext2D();
 
         AnimationTimer timer = new AnimationTimer() {
-            long lastTime = 0;
+            long lastTimeMs = 0;
             @Override
-            public void handle(long now) {
-                if (lastTime == 0) {
-                    lastTime = now;
+            public void handle(long ignoredNow) {
+                long nowMs = System.currentTimeMillis();
+                if (lastTimeMs == 0) {
+                    lastTimeMs = nowMs;
                     return;
                 }
-                double deltaSec = (now - lastTime) / 1_000_000_000.0;
-                lastTime = now;
+                double deltaSec = (nowMs - lastTimeMs) / 1000.0;
+                lastTimeMs = nowMs;
 
-                update(now, deltaSec);
+                update(nowMs, deltaSec);
                 draw(g);
             }
         };
@@ -166,19 +167,19 @@ public class BallFlowApp extends Application {
             Ball b = inPipeL2R.get(i);
             double newX = b.x + b.speed * deltaSec;
             double newY = clampToPipe(b.y + wobble(deltaSec), pipeTopY, pipeHeight, BALL_RADIUS);
-            Ball moved = new Ball(newX, newY, b.color, b.speed, b.startNs, b.cbChecked, b.shortCircuited);
+            Ball moved = new Ball(newX, newY, b.color, b.speed, b.startMs, b.cbChecked, b.shortCircuited);
 
             // At CB position, if not yet checked, decide permission with connection pool gating
             if (!b.cbChecked && newX >= cbX) {
                 int inFlight = (int) inPipeL2R.stream().filter(bb -> bb.cbChecked).count();
                 if (inFlight >= MAX_IN_FLIGHT) {
                     // No capacity: hold at CB icon; try again next frame
-                    moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startNs, false, false);
+                    moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startMs, false, false);
                 } else {
                     try {
                         circuitBreaker.acquirePermission();
                         // permitted: mark as checked and continue as ball
-                        moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startNs, true, false);
+                        moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startMs, true, false);
                     } catch (CallNotPermittedException e) {
                         // denied: convert to orange square at CB and send back immediately via bottom pipe
                         shortCircuitedCount++;
@@ -204,15 +205,15 @@ public class BallFlowApp extends Application {
         if (!arrivedTop.isEmpty()) {
             inPipeL2R.removeAll(arrivedTop);
             for (Ball b : arrivedTop) {
-                long durationNs = now - b.startNs;
+                long durationMs = now - b.startMs;
                 // Only permitted balls reach here; simulate remote call outcome and record in CB
                 boolean failed = random.nextDouble() < failureProbability;
                 if (failed) {
-                    circuitBreaker.onError(durationNs, TimeUnit.NANOSECONDS, new RuntimeException("simulated-failure"));
+                    circuitBreaker.onError(durationMs, TimeUnit.MILLISECONDS, new RuntimeException("simulated-failure"));
                     rightSquares.add(new Square(0, 0, Color.web("#ef4444"), 0));
                     addOutcome(Outcome.FAILURE);
                 } else {
-                    circuitBreaker.onSuccess(durationNs, TimeUnit.NANOSECONDS);
+                    circuitBreaker.onSuccess(durationMs, TimeUnit.MILLISECONDS);
                     rightSquares.add(new Square(0, 0, b.color, 0));
                     addOutcome(Outcome.SUCCESS);
                 }
@@ -272,18 +273,18 @@ public class BallFlowApp extends Application {
 
         // Gentle randomization of spawn intervals to make flow less uniform
         if (random.nextDouble() < 0.01) {
-            spawnIntervalL2RNs = (long) (300_000_000L + random.nextDouble() * 600_000_000L);
+            spawnIntervalL2RNs = (long) (300L + random.nextDouble() * 600L); // 300–900 ms
         }
         if (random.nextDouble() < 0.01) {
-            spawnIntervalR2LNs = (long) (300_000_000L + random.nextDouble() * 600_000_000L);
+            spawnIntervalR2LNs = (long) (300L + random.nextDouble() * 600L); // 300–900 ms
         }
 
         // Slowly vary failure probability over time (simulate bad periods)
-        if (now - lastProbUpdateNs > 200_000_000L) { // update ~5 times/sec
-            double t = (now / 1_000_000_000.0);
+        if (now - lastProbUpdateMs > 200L) { // update ~5 times/sec
+            double t = (now / 1000.0);
             // base 0.2, oscillate +/-0.25 with a slow sine wave
             failureProbability = clamp(0.0, 1.0, 0.2 + 0.25 * Math.sin(t * 0.5) + 0.05 * Math.sin(t * 2.7));
-            lastProbUpdateNs = now;
+            lastProbUpdateMs = now;
         }
     }
 
@@ -554,7 +555,7 @@ public class BallFlowApp extends Application {
         double saturation = 0.65 + random.nextDouble() * 0.3; // [0.65, 0.95)
         double brightness = 0.80 + random.nextDouble() * 0.2; // [0.80, 1.0)
         Color color = Color.hsb(hueDeg, saturation, brightness);
-        return new Ball(0, 0, color, 0, System.nanoTime(), false, false);
+        return new Ball(0, 0, color, 0, System.currentTimeMillis(), false, false);
     }
 
     public static void main(String[] args) {
