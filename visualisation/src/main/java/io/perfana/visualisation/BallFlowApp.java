@@ -243,7 +243,7 @@ public class BallFlowApp extends Application {
         if (now - lastSpawnR2LNs >= spawnIntervalR2LNs && !rightSquares.isEmpty()) {
             Square nextSq = rightSquares.pollFirst();
             if (nextSq != null) {
-                double pipeEntryX = rightBoxX - (PIPE_WIDTH / 2.0);
+                double pipeEntryX = rightBoxX - (SQUARE_SIZE / 2.0) - 6; // start more to the right inside the pipe
                 double pipeEntryY = pipeBottomY + pipeHeight / 2.0; // exact center of bottom pipe
                 inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, nextSq.color, 80 + random.nextDouble() * 120));
             }
@@ -259,7 +259,9 @@ public class BallFlowApp extends Application {
             Square moved = new Square(newX, newY, s.color, s.speed);
             inPipeR2L.set(i, moved);
 
-            if (newX <= leftBoxX + BOX_WIDTH / 2.0 + BALL_RADIUS) {
+            // Stop a bit earlier before entering the left box: at the start of the bottom pipe plus small margin
+            double pipeBottomX = leftBoxX + BOX_WIDTH;
+            if (newX <= pipeBottomX + (SQUARE_SIZE / 2.0) + 6) {
                 arrivedBottom.add(moved);
             }
         }
