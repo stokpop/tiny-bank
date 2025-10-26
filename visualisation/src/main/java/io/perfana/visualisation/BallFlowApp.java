@@ -54,6 +54,7 @@ public class BallFlowApp extends Application {
 
     private record Ball(double x, double y, Color color, double speed, long startMs, boolean cbChecked, boolean shortCircuited) {}
     private record Square(double x, double y, Color color, double speed) {}
+    private record ShortCircuitTransition(double x, double yStart, double yEnd, double speed, long startMs, long durationMs, double currentY) {}
 
     // CircuitBreaker model
     private CircuitBreaker circuitBreaker;
@@ -77,6 +78,9 @@ public class BallFlowApp extends Application {
     private final List<Ball> inPipeL2R = new ArrayList<>(); // top pipe: left -> right (balls before CB decision)
     private final List<Square> inPipeL2RShort = new ArrayList<>(); // top pipe: left -> right (orange short-circuited squares)
     private final List<Square> inPipeR2L = new ArrayList<>(); // bottom pipe: right -> left
+    
+    // Visual transition of NOT_PERMITTED: ball morphs to orange square inside CB column
+    private final List<ShortCircuitTransition> shortCircuitTransitions = new ArrayList<>();
 
     private long lastSpawnL2RNs = 0;
     private long spawnIntervalL2RNs = 500L; // 0.5s default, now in milliseconds
@@ -181,11 +185,13 @@ public class BallFlowApp extends Application {
                         // permitted: mark as checked and continue as ball
                         moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startMs, true, false);
                     } catch (CallNotPermittedException e) {
-                        // denied: convert to orange square at CB and send back immediately via bottom pipe
+                        // denied: start a short transition INSIDE the CB column from top pipe center to bottom pipe center
                         shortCircuitedCount++;
                         addOutcome(Outcome.NOT_PERMITTED);
-                        double bottomCenterY = pipeBottomY + pipeHeight / 2.0; // exact center of bottom pipe
-                        inPipeR2L.add(new Square(cbX, bottomCenterY, SHORT_CIRCUIT_COLOR, moved.speed));
+                        double topCenterY = pipeTopY + pipeHeight / 2.0;
+                        double bottomCenterY = pipeBottomY + pipeHeight / 2.0;
+                        long durationMs = 250L; // smooth morph duration
+                        shortCircuitTransitions.add(new ShortCircuitTransition(cbX, topCenterY, bottomCenterY, moved.speed, now, durationMs, topCenterY));
                         toRemoveFromPipe.add(b);
                         continue; // don't keep the ball in top pipe
                     }
@@ -220,7 +226,7 @@ public class BallFlowApp extends Application {
             }
         }
 
-        // Move short-circuited squares along the top pipe to the right
+        // Move short-circuited squares along the top pipe to the right (legacy path if any remain)
         List<Square> arrivedShort = new ArrayList<>();
         for (int i = 0; i < inPipeL2RShort.size(); i++) {
             Square s = inPipeL2RShort.get(i);
@@ -237,6 +243,28 @@ public class BallFlowApp extends Application {
             // deposit orange squares into right box
             for (Square s : arrivedShort) {
                 rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0));
+            }
+        }
+
+        // Advance short-circuit transitions inside the CB and inject into bottom pipe when done
+        if (!shortCircuitTransitions.isEmpty()) {
+            List<ShortCircuitTransition> finished = new ArrayList<>();
+            for (int i = 0; i < shortCircuitTransitions.size(); i++) {
+                ShortCircuitTransition t = shortCircuitTransitions.get(i);
+                double elapsed = now - t.startMs;
+                double progress = clamp(0.0, 1.0, elapsed / (double) t.durationMs);
+                double y = t.yStart + (t.yEnd - t.yStart) * progress;
+                shortCircuitTransitions.set(i, new ShortCircuitTransition(t.x, t.yStart, t.yEnd, t.speed, t.startMs, t.durationMs, y));
+                if (progress >= 1.0) {
+                    finished.add(shortCircuitTransitions.get(i));
+                }
+            }
+            if (!finished.isEmpty()) {
+                for (ShortCircuitTransition t : finished) {
+                    // inject orange square into bottom pipe at CB X and bottom center Y, preserving speed
+                    inPipeR2L.add(new Square(t.x, t.yEnd, SHORT_CIRCUIT_COLOR, t.speed));
+                }
+                shortCircuitTransitions.removeAll(finished);
             }
         }
 
@@ -364,6 +392,11 @@ public class BallFlowApp extends Application {
 
         // Draw Circuit Breaker icon spanning both pipes
         drawCircuitBreakerIcon(g, pipeTopX, pipeTopY, pipeBottomY, pipeLength, pipeHeight);
+
+        // Draw transitions inside the CB column (orange squares moving vertically)
+        for (ShortCircuitTransition t : shortCircuitTransitions) {
+            drawSquare(g, t.x, t.currentY, SHORT_CIRCUIT_COLOR);
+        }
 
         // HUD overlay with CircuitBreaker state and failure rate
         drawHud(g);
