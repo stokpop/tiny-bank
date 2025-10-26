@@ -139,13 +139,20 @@ public class BallFlowApp extends Application {
         // Geometry used for movement decisions
         double leftBoxX = BOX_MARGIN;
         double rightBoxX = WIDTH - BOX_MARGIN - BOX_WIDTH;
+        // Pipe geometry (must mirror draw())
+        double pipeTopX = leftBoxX + BOX_WIDTH;
+        double pipeTopY = HEIGHT / 2.0 - 40;
+        double pipeHeight = 40;
+        double pipeBottomY = HEIGHT / 2.0 + 40;
+        double pipeLength = (WIDTH - BOX_MARGIN - BOX_WIDTH) - pipeTopX; // rightBoxX - pipeTopX
+        double cbX = pipeTopX + CB_POS_FRACTION * pipeLength;
 
         // Spawn one ball from left box into the TOP pipe at intervals (left -> right)
         if (now - lastSpawnL2RNs >= spawnIntervalL2RNs && !leftBalls.isEmpty()) {
             Ball next = leftBalls.pollFirst();
             if (next != null) {
                 double pipeEntryX = leftBoxX + BOX_WIDTH + (PIPE_WIDTH / 2.0);
-                double pipeEntryY = HEIGHT / 2.0 - 20 + 20; // center of top pipe
+                double pipeEntryY = pipeTopY + pipeHeight / 2.0; // exact center of top pipe
                 inPipeL2R.add(new Ball(pipeEntryX, pipeEntryY, next.color, 80 + random.nextDouble() * 120, now, false, false));
             }
             lastSpawnL2RNs = now;
@@ -155,14 +162,11 @@ public class BallFlowApp extends Application {
         List<Ball> arrivedTop = new ArrayList<>();
         List<Ball> toRemoveFromPipe = new ArrayList<>();
 
-        double pipeTopX = leftBoxX + BOX_WIDTH;
-        double pipeLength = (WIDTH - BOX_MARGIN - BOX_WIDTH) - pipeTopX; // rightBoxX - pipeTopX
-        double cbX = pipeTopX + CB_POS_FRACTION * pipeLength;
-
         for (int i = 0; i < inPipeL2R.size(); i++) {
             Ball b = inPipeL2R.get(i);
             double newX = b.x + b.speed * deltaSec;
-            Ball moved = new Ball(newX, b.y + wobble(deltaSec), b.color, b.speed, b.startNs, b.cbChecked, b.shortCircuited);
+            double newY = clampToPipe(b.y + wobble(deltaSec), pipeTopY, pipeHeight, BALL_RADIUS);
+            Ball moved = new Ball(newX, newY, b.color, b.speed, b.startNs, b.cbChecked, b.shortCircuited);
 
             // At CB position, if not yet checked, decide permission with connection pool gating
             if (!b.cbChecked && newX >= cbX) {
@@ -179,7 +183,7 @@ public class BallFlowApp extends Application {
                         // denied: convert to orange square at CB and send back immediately via bottom pipe
                         shortCircuitedCount++;
                         addOutcome(Outcome.NOT_PERMITTED);
-                        double bottomCenterY = HEIGHT / 2.0 + 60 + 20; // center of bottom pipe
+                        double bottomCenterY = pipeBottomY + pipeHeight / 2.0; // exact center of bottom pipe
                         inPipeR2L.add(new Square(cbX, bottomCenterY, SHORT_CIRCUIT_COLOR, moved.speed));
                         toRemoveFromPipe.add(b);
                         continue; // don't keep the ball in top pipe
@@ -220,7 +224,8 @@ public class BallFlowApp extends Application {
         for (int i = 0; i < inPipeL2RShort.size(); i++) {
             Square s = inPipeL2RShort.get(i);
             double newX = s.x + s.speed * deltaSec;
-            Square moved = new Square(newX, s.y + wobble(deltaSec), s.color, s.speed);
+            double newY = clampToPipe(s.y + wobble(deltaSec), pipeTopY, pipeHeight, SQUARE_SIZE / 2.0);
+            Square moved = new Square(newX, newY, s.color, s.speed);
             inPipeL2RShort.set(i, moved);
             if (newX >= rightBoxX + BOX_WIDTH / 2.0 - BALL_RADIUS) {
                 arrivedShort.add(moved);
@@ -239,7 +244,7 @@ public class BallFlowApp extends Application {
             Square nextSq = rightSquares.pollFirst();
             if (nextSq != null) {
                 double pipeEntryX = rightBoxX - (PIPE_WIDTH / 2.0);
-                double pipeEntryY = HEIGHT / 2.0 + 60 + 20; // center of bottom pipe
+                double pipeEntryY = pipeBottomY + pipeHeight / 2.0; // exact center of bottom pipe
                 inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, nextSq.color, 80 + random.nextDouble() * 120));
             }
             lastSpawnR2LNs = now;
@@ -250,7 +255,8 @@ public class BallFlowApp extends Application {
         for (int i = 0; i < inPipeR2L.size(); i++) {
             Square s = inPipeR2L.get(i);
             double newX = s.x - s.speed * deltaSec; // moving leftwards
-            Square moved = new Square(newX, s.y + wobble(deltaSec), s.color, s.speed);
+            double newY = clampToPipe(s.y + wobble(deltaSec), pipeBottomY, pipeHeight, SQUARE_SIZE / 2.0);
+            Square moved = new Square(newX, newY, s.color, s.speed);
             inPipeR2L.set(i, moved);
 
             if (newX <= leftBoxX + BOX_WIDTH / 2.0 + BALL_RADIUS) {
@@ -281,6 +287,14 @@ public class BallFlowApp extends Application {
 
     private double wobble(double deltaSec) {
         return (random.nextDouble() - 0.5) * 10 * deltaSec * 60; // small vertical jitter
+    }
+
+    private double clampToPipe(double y, double pipeY, double pipeHeight, double halfSize) {
+        double minY = pipeY + halfSize + 2; // small padding from pipe border
+        double maxY = pipeY + pipeHeight - halfSize - 2;
+        if (y < minY) return minY;
+        if (y > maxY) return maxY;
+        return y;
     }
 
     private void draw(GraphicsContext g) {
@@ -345,18 +359,20 @@ public class BallFlowApp extends Application {
             drawSquare(g, s.x, s.y, s.color);
         }
 
-        // Draw Circuit Breaker icon in top pipe
-        drawCircuitBreakerIcon(g, pipeTopX, pipeTopY, pipeLength, pipeHeight);
+        // Draw Circuit Breaker icon spanning both pipes
+        drawCircuitBreakerIcon(g, pipeTopX, pipeTopY, pipeBottomY, pipeLength, pipeHeight);
 
         // HUD overlay with CircuitBreaker state and failure rate
         drawHud(g);
         drawBufferPanel(g);
     }
 
-    private void drawCircuitBreakerIcon(GraphicsContext g, double pipeTopX, double pipeTopY, double pipeLength, double pipeHeight) {
+    private void drawCircuitBreakerIcon(GraphicsContext g, double pipeTopX, double pipeTopY, double pipeBottomY, double pipeLength, double pipeHeight) {
         double cbX = pipeTopX + CB_POS_FRACTION * pipeLength;
-        double cbY = pipeTopY + pipeHeight / 2.0;
-        double w = 36, h = 20;
+        double topY = pipeTopY - 8; // slight overlap above top pipe
+        double bottomY = pipeBottomY + pipeHeight + 8; // slight overlap below bottom pipe
+        double columnW = 36;
+        double columnH = bottomY - topY;
 
         Color stateColor;
         switch (circuitBreaker.getState()) {
@@ -364,17 +380,24 @@ public class BallFlowApp extends Application {
             case HALF_OPEN -> stateColor = Color.web("#f59e0b");
             default -> stateColor = Color.web("#22c55e"); // CLOSED and others
         }
-        g.setFill(Color.color(0,0,0,0.35));
-        g.fillRoundRect(cbX - w/2 - 3, cbY - h/2 - 3, w + 6, h + 6, 8, 8);
 
+        // Shadow
+        g.setFill(Color.color(0,0,0,0.35));
+        g.fillRoundRect(cbX - columnW/2 - 3, topY - 3, columnW + 6, columnH + 6, 10, 10);
+
+        // Column background
         g.setFill(Color.color(0.1,0.1,0.1,0.9));
-        g.fillRoundRect(cbX - w/2, cbY - h/2, w, h, 6, 6);
+        g.fillRoundRect(cbX - columnW/2, topY, columnW, columnH, 8, 8);
+
+        // State-colored border
         g.setStroke(stateColor);
         g.setLineWidth(2);
-        g.strokeRoundRect(cbX - w/2, cbY - h/2, w, h, 6, 6);
+        g.strokeRoundRect(cbX - columnW/2, topY, columnW, columnH, 8, 8);
 
+        // Label in the middle of the column
         g.setFill(stateColor);
-        g.fillText("CB", cbX - 8, cbY + 4);
+        double midY = topY + columnH / 2.0;
+        g.fillText("CB", cbX - 8, midY + 4);
     }
 
     private void drawBufferPanel(GraphicsContext g) {
