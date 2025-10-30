@@ -4,6 +4,11 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.perfana.visualisation.model.Outcome;
+import io.perfana.visualisation.view.HudRenderer;
+import io.perfana.visualisation.view.ShapeRenderer;
+import io.perfana.visualisation.view.ServicesAndPipesRenderer;
+import io.perfana.visualisation.view.CircuitBreakerRenderer;
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.scene.Scene;
@@ -30,6 +35,12 @@ import java.util.concurrent.TimeUnit;
  * A HUD shows breaker state and failure rate over time.
  */
 public class BallFlowApp extends Application {
+
+    // View components
+    private final HudRenderer hudRenderer = new HudRenderer();
+    private final ServicesAndPipesRenderer servicesRenderer = new ServicesAndPipesRenderer();
+    private final CircuitBreakerRenderer cbRenderer = new CircuitBreakerRenderer();
+    private final ShapeRenderer shapeRenderer = new ShapeRenderer();
 
     private static final double WIDTH = 900;
     private static final double HEIGHT = 440;
@@ -68,7 +79,6 @@ public class BallFlowApp extends Application {
     // In-flight pool tracking: increment on permit, decrement only when the returning square crosses the CB on the way back
     private int currentInFlight = 0;
 
-    private enum Outcome { SUCCESS, FAILURE, NOT_PERMITTED }
     private final Deque<Outcome> recentOutcomes = new ArrayDeque<>();
 
     // Left box contents: balls (original) and squares (returned)
@@ -413,30 +423,13 @@ public class BallFlowApp extends Application {
         double pipeBottomX = pipeTopX;
         double pipeBottomY = HEIGHT / 2.0 + 40;
 
-        // Draw left box
-        g.setStroke(Color.web("#7aa2f7"));
-        g.setLineWidth(2.0);
-        g.strokeRoundRect(leftBoxX, leftBoxY, BOX_WIDTH, BOX_HEIGHT, 10, 10);
-        g.setFill(Color.web("#111827"));
-        g.fillRoundRect(leftBoxX, leftBoxY, BOX_WIDTH, BOX_HEIGHT, 10, 10);
-
-        // Draw right box
-        g.setStroke(Color.web("#a6e3a1"));
-        g.strokeRoundRect(rightBoxX, rightBoxY, BOX_WIDTH, BOX_HEIGHT, 10, 10);
-        g.setFill(Color.web("#111827"));
-        g.fillRoundRect(rightBoxX, rightBoxY, BOX_WIDTH, BOX_HEIGHT, 10, 10);
-
-        // Draw top pipe
-        g.setFill(Color.web("#94a3b8"));
-        g.fillRoundRect(pipeTopX, pipeTopY, pipeLength, pipeHeight, 20, 20);
-        g.setStroke(Color.web("#475569"));
-        g.strokeRoundRect(pipeTopX, pipeTopY, pipeLength, pipeHeight, 20, 20);
-
-        // Draw bottom pipe
-        g.setFill(Color.web("#94a3b8"));
-        g.fillRoundRect(pipeBottomX, pipeBottomY, pipeLength, pipeHeight, 20, 20);
-        g.setStroke(Color.web("#475569"));
-        g.strokeRoundRect(pipeBottomX, pipeBottomY, pipeLength, pipeHeight, 20, 20);
+        // Draw service boxes and both pipes
+        servicesRenderer.drawBoxesAndPipes(g,
+                leftBoxX, leftBoxY,
+                rightBoxX, rightBoxY,
+                pipeTopX, pipeTopY,
+                pipeBottomY, pipeLength, pipeHeight,
+                BOX_WIDTH, BOX_HEIGHT);
 
         // Draw contents in boxes
         drawMixedInBox(g, leftBoxX, leftBoxY, leftBalls, leftSquares);
@@ -464,66 +457,12 @@ public class BallFlowApp extends Application {
         }
 
         // HUD overlay with CircuitBreaker state and failure rate
-        drawHud(g);
-        drawBufferPanel(g);
+        hudRenderer.draw(g, circuitBreaker, currentInFlight, MAX_IN_FLIGHT, failureProbability, recentOutcomes, bufferVisualSize);
     }
 
     private void drawCircuitBreakerIcon(GraphicsContext g, double pipeTopX, double pipeTopY, double pipeBottomY, double pipeLength, double pipeHeight) {
         double cbX = pipeTopX + CB_POS_FRACTION * pipeLength;
-        double topY = pipeTopY - 8; // slight overlap above top pipe
-        double bottomY = pipeBottomY + pipeHeight + 8; // slight overlap below bottom pipe
-        double columnW = 36;
-        double columnH = bottomY - topY;
-
-        Color stateColor;
-        switch (circuitBreaker.getState()) {
-            case OPEN -> stateColor = Color.web("#ef4444");
-            case HALF_OPEN -> stateColor = Color.web("#f59e0b");
-            default -> stateColor = Color.web("#22c55e"); // CLOSED and others
-        }
-
-        // Shadow
-        g.setFill(Color.color(0,0,0,0.35));
-        g.fillRoundRect(cbX - columnW/2 - 3, topY - 3, columnW + 6, columnH + 6, 10, 10);
-
-        // Column background
-        g.setFill(Color.color(0.1,0.1,0.1,0.9));
-        g.fillRoundRect(cbX - columnW/2, topY, columnW, columnH, 8, 8);
-
-        // State-colored border
-        g.setStroke(stateColor);
-        g.setLineWidth(2);
-        g.strokeRoundRect(cbX - columnW/2, topY, columnW, columnH, 8, 8);
-
-        // Label in the middle of the column
-        g.setFill(stateColor);
-        double midY = topY + columnH / 2.0;
-        g.fillText("CB", cbX - 8, midY + 4);
-    }
-
-    private void drawBufferPanel(GraphicsContext g) {
-        // Panel near HUD (top-left)
-        double x = 260, y = 14;
-        g.setFill(Color.color(1,1,1,0.9));
-        g.fillText("Buffer (latest " + bufferVisualSize + ")", x, y);
-        double cell = 10;
-        double pad = 2;
-        double startY = y + 6;
-        int idx = 0;
-        for (Outcome o : recentOutcomes) {
-            double cx = x + (idx % bufferVisualSize) * (cell + pad);
-            double cy = startY + 10;
-            Color c = switch (o) {
-                case SUCCESS -> Color.web("#22c55e");
-                case FAILURE -> Color.web("#ef4444");
-                case NOT_PERMITTED -> SHORT_CIRCUIT_COLOR;
-            };
-            g.setFill(c);
-            g.fillRect(cx, cy, cell, cell);
-            g.setStroke(Color.color(0,0,0,0.4));
-            g.strokeRect(cx, cy, cell, cell);
-            idx++;
-        }
+        cbRenderer.drawColumn(g, circuitBreaker, cbX, pipeTopY, pipeBottomY, pipeHeight);
     }
 
     private void addOutcome(Outcome outcome) {
@@ -629,17 +568,11 @@ public class BallFlowApp extends Application {
     }
 
     private void drawBall(GraphicsContext g, double x, double y, Color color) {
-        // Draw hollow ball (outline only)
-        g.setStroke(color);
-        g.setLineWidth(2.5);
-        g.strokeOval(x - BALL_RADIUS, y - BALL_RADIUS, BALL_RADIUS * 2, BALL_RADIUS * 2);
+        shapeRenderer.drawBall(g, x, y, color);
     }
 
     private void drawSquare(GraphicsContext g, double x, double y, Color color) {
-        g.setFill(color);
-        g.fillRect(x - SQUARE_SIZE / 2.0, y - SQUARE_SIZE / 2.0, SQUARE_SIZE, SQUARE_SIZE);
-        g.setStroke(Color.color(0,0,0,0.4));
-        g.strokeRect(x - SQUARE_SIZE / 2.0, y - SQUARE_SIZE / 2.0, SQUARE_SIZE, SQUARE_SIZE);
+        shapeRenderer.drawSquare(g, x, y, color);
     }
 
     private void drawHud(GraphicsContext g) {

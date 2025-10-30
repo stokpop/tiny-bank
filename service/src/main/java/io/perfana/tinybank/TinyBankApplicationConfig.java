@@ -114,8 +114,6 @@ public class TinyBankApplicationConfig {
                     .setTlsSocketStrategy(tlsStrategy)
                     .build();
 
-            connectionManager.setDefaultConnectionConfig(connectionConfig);
-
             return connectionManager;
         } catch (Exception e) {
             throw new IllegalStateException("Failed to create SSL-enabled Apache HttpClient; SSL bundle missing.", e);
