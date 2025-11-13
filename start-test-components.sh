@@ -141,7 +141,7 @@ fi
 JAVA_OPTIONS="-Xmx512m"
 
 mkdir -p logs
-java $JFR_AGENT $OTEL_AGENT $JAVA_OPTIONS -jar service/target/tiny-bank-service-0.0.1-SNAPSHOT.jar >logs/tiny-bank-service.log 2>logs/tiny-bank-service.log &
+java $JFR_AGENT $OTEL_AGENT $JAVA_OPTIONS -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 -jar service/target/tiny-bank-service-0.0.1-SNAPSHOT.jar >logs/tiny-bank-service.log 2>logs/tiny-bank-service.log &
 
 echo "Starting tiny-fe"
 cd app/tiny-fe

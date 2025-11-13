@@ -87,6 +87,7 @@ public class TinyBankApplicationConfig {
                 // Be explicit about intent to keep the connection alive
                 .setDefaultHeaders(List.of(new BasicHeader(HttpHeaders.CONNECTION, "keep-alive")))
                 .addRequestInterceptorFirst(createHttpRequestInterceptor())
+                .addRequestInterceptorFirst(createHttpRequestInterceptorForLogging())
                 .addResponseInterceptorLast(createHttpResponseInterceptor())
                 .addExecInterceptorLast("micrometer", new ObservationExecChainHandler(observationRegistry));
 
@@ -163,6 +164,12 @@ public class TinyBankApplicationConfig {
             context.setAttribute("http.url", uri);
             context.setAttribute("http.uri", path != null ? path : uri);
             context.setAttribute("uri.template", path != null ? path : uri);
+        };
+    }
+
+    private static HttpRequestInterceptor createHttpRequestInterceptorForLogging() {
+        return (request, entityDetails, context) -> {
+            logger.info("Call my httpclient for {}", request.getPath());
         };
     }
 
