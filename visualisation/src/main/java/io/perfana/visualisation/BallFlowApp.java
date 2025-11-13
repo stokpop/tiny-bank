@@ -15,6 +15,14 @@ import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.geometry.Insets;
+import javafx.scene.layout.Priority;
+import javafx.scene.control.Button;
+import javafx.scene.control.Slider;
+import javafx.scene.image.WritableImage;
+import javafx.scene.SnapshotParameters;
+import javafx.scene.transform.Scale;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 
@@ -43,7 +51,8 @@ public class BallFlowApp extends Application {
     private final ShapeRenderer shapeRenderer = new ShapeRenderer();
 
     private static final double WIDTH = 900;
-    private static final double HEIGHT = 440;
+    private static final double HEIGHT = 560; // increased to prevent left box from overlapping HUD
+    private static final double CONTROL_BAR_HEIGHT = 48;
 
     private static final double BOX_MARGIN = 40;
     private static final double BOX_WIDTH = 220;
@@ -63,10 +72,24 @@ public class BallFlowApp extends Application {
 
     private final Random random = new Random();
 
+    // Time slider and frame history for scrubbing
+    private Slider timeSlider;
+    private final List<WritableImage> frameHistory = new ArrayList<>();
+    private static final int MAX_FRAMES = 480; // ~16s at 30 FPS capture (with CAPTURE_EVERY_N=2)
+    private static final double SNAPSHOT_SCALE = 0.6; // improve readability while keeping memory moderate
+    private static final boolean IMAGE_SMOOTHING_IN_SCRUB = false; // keep text crisp when scaling up
+    private static final int CAPTURE_EVERY_N = 2; // capture decimation to extend history length
+    private boolean scrubbing = false;
+    private boolean paused = false;
+    private Button playPauseButton;
+    private Button restartButton;
+    private Canvas canvasRef;
+    private GraphicsContext graphicsRef;
+
     private record Ball(double x, double y, Color color, double speed, long startMs, boolean cbChecked, boolean shortCircuited) {}
-    private record Square(double x, double y, Color color, double speed, Outcome outcome, boolean occupiesSlot) {}
+    private record Square(double x, double y, Color color, double speed, Outcome outcome, boolean occupiesSlot, Long callDurationMs) {}
     private record ShortCircuitTransition(double x, double yStart, double yEnd, double speed, long startMs, long durationMs, double currentY) {}
-    private record RightBoxMorph(double xStart, double yStart, double xEnd, double yEnd, Color ballColor, Color squareColor, Outcome outcome, boolean occupiesSlot, long startMs, long durationMs, double progress) {}
+    private record RightBoxMorph(double xStart, double yStart, double xEnd, double yEnd, Color ballColor, Color squareColor, Outcome outcome, boolean occupiesSlot, Long callDurationMs, long startMs, long durationMs, double progress) {}
 
     // CircuitBreaker model
     private CircuitBreaker circuitBreaker;
@@ -99,6 +122,16 @@ public class BallFlowApp extends Application {
     // Right box morphs: permitted ball arriving morphs into a filled square at its grid slot
     private final List<RightBoxMorph> rightBoxMorphs = new ArrayList<>();
 
+    // Counters
+    private long totalDepartedLeft = 0L; // total number of balls that have left the left box (entered the top pipe)
+    // Totals for right box (cumulative placed results)
+    private long totalRightSuccess = 0L;
+    private long totalRightFailure = 0L;
+    // Totals for returned squares crossing CB on the way back (considered as returned)
+    private long totalReturnedSuccess = 0L;
+    private long totalReturnedFailure = 0L;
+    private long totalReturnedNotPermitted = 0L;
+
     private long lastSpawnL2RNs = 0;
     private long spawnIntervalL2RNs = 500L; // 0.5s default, now in milliseconds
 
@@ -110,8 +143,29 @@ public class BallFlowApp extends Application {
         stage.setTitle("Tiny Bank - Circuit Breaker Visualisation");
 
         BorderPane root = new BorderPane();
-        Canvas canvas = new Canvas(WIDTH, HEIGHT);
+        Canvas canvas = new Canvas(WIDTH, HEIGHT - CONTROL_BAR_HEIGHT);
+        this.canvasRef = canvas;
         root.setCenter(canvas);
+
+        // Controls bar at the bottom: Play/Pause, Restart, and Time Slider
+        timeSlider = new Slider(0.0, 1.0, 1.0);
+        timeSlider.setMaxWidth(Double.MAX_VALUE);
+        // Track when user is dragging the slider to enter/exit scrubbing mode
+        timeSlider.valueChangingProperty().addListener((obs, wasChanging, isChanging) -> scrubbing = isChanging);
+        // Also handle click-to-jump without drag
+        timeSlider.setOnMousePressed(e -> scrubbing = true);
+        timeSlider.setOnMouseReleased(e -> scrubbing = false);
+
+        playPauseButton = new Button("Pause");
+        playPauseButton.setOnAction(e -> togglePause());
+
+        restartButton = new Button("Restart");
+        restartButton.setOnAction(e -> restartSimulation());
+
+        HBox controls = new HBox(10, playPauseButton, restartButton, timeSlider);
+        HBox.setHgrow(timeSlider, Priority.ALWAYS);
+        controls.setPadding(new Insets(8, 12, 8, 12));
+        root.setBottom(controls);
 
         Scene scene = new Scene(root, WIDTH, HEIGHT, Color.web("#0f141a"));
         stage.setScene(scene);
@@ -137,9 +191,11 @@ public class BallFlowApp extends Application {
         }
 
         GraphicsContext g = canvas.getGraphicsContext2D();
+        this.graphicsRef = g;
 
         AnimationTimer timer = new AnimationTimer() {
             long lastTimeMs = 0;
+            int captureTick = 0;
             @Override
             public void handle(long ignoredNow) {
                 long nowMs = System.currentTimeMillis();
@@ -150,11 +206,120 @@ public class BallFlowApp extends Application {
                 double deltaSec = (nowMs - lastTimeMs) / 1000.0;
                 lastTimeMs = nowMs;
 
-                update(nowMs, deltaSec);
-                draw(g);
+                if (!scrubbing) {
+                    if (!paused) {
+                        // Normal live mode: update and draw the current frame
+                        update(nowMs, deltaSec);
+                        draw(g);
+                        // Capture the canvas into the history for later scrubbing
+                        try {
+                            // Decimate captures to reduce memory and extend scroll-back duration
+                            captureTick = (captureTick + 1) % CAPTURE_EVERY_N;
+                            if (captureTick == 0) {
+                                SnapshotParameters params = new SnapshotParameters();
+                                params.setTransform(new Scale(SNAPSHOT_SCALE, SNAPSHOT_SCALE));
+                                WritableImage snapshot = canvas.snapshot(params, null);
+                                frameHistory.add(snapshot);
+                                if (frameHistory.size() > MAX_FRAMES) {
+                                    frameHistory.remove(0);
+                                }
+                            }
+                        } catch (Exception ignored) {
+                            // Snapshot failures should not break the animation
+                        }
+                    } else {
+                        // Paused: no update, just keep displaying the last drawn frame
+                        // Optionally redraw HUD overlays if needed
+                        draw(g);
+                    }
+                    // Stick slider to the end while playing or paused
+                    if (!timeSlider.isValueChanging()) {
+                        timeSlider.setValue(1.0);
+                    }
+                } else {
+                    // Scrubbing mode: render the selected historical frame image
+                    if (!frameHistory.isEmpty()) {
+                        int size = frameHistory.size();
+                        double v = clamp(0.0, 1.0, timeSlider.getValue());
+                        int idx = (int) Math.round(v * (size - 1));
+                        idx = Math.max(0, Math.min(size - 1, idx));
+                        WritableImage img = frameHistory.get(idx);
+                        // Draw the historical image scaled back to canvas size, with optional smoothing control
+                        boolean prevSmoothing = g.isImageSmoothing();
+                        g.setImageSmoothing(IMAGE_SMOOTHING_IN_SCRUB);
+                        g.drawImage(img, 0, 0, img.getWidth(), img.getHeight(), 0, 0, canvas.getWidth(), canvas.getHeight());
+                        g.setImageSmoothing(prevSmoothing);
+                    }
+                }
             }
         };
         timer.start();
+    }
+
+    private void togglePause() {
+        paused = !paused;
+        if (playPauseButton != null) {
+            playPauseButton.setText(paused ? "Play" : "Pause");
+        }
+    }
+
+    private void restartSimulation() {
+        // Clear simulation state
+        inPipeL2R.clear();
+        inPipeL2RShort.clear();
+        inPipeR2L.clear();
+        shortCircuitTransitions.clear();
+        rightBoxMorphs.clear();
+        leftBalls.clear();
+        leftSquares.clear();
+        rightSquares.clear();
+        recentOutcomes.clear();
+        frameHistory.clear();
+
+        currentInFlight = 0;
+        shortCircuitedCount = 0L;
+        totalDepartedLeft = 0L;
+        totalRightSuccess = 0L;
+        totalRightFailure = 0L;
+        totalReturnedSuccess = 0L;
+        totalReturnedFailure = 0L;
+        totalReturnedNotPermitted = 0L;
+        lastSpawnL2RNs = 0L;
+        lastSpawnR2LNs = 0L;
+        lastProbUpdateMs = 0L;
+        failureProbability = 0.2;
+
+        // Recreate CircuitBreaker with same config
+        CircuitBreakerConfig cbConfig = CircuitBreakerConfig.custom()
+                .failureRateThreshold(50.0f)
+                .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                .slidingWindowSize(5)
+                .minimumNumberOfCalls(4)
+                .waitDurationInOpenState(Duration.ofSeconds(3))
+                .permittedNumberOfCallsInHalfOpenState(5)
+                .automaticTransitionFromOpenToHalfOpenEnabled(true)
+                .build();
+        CircuitBreakerRegistry registry = CircuitBreakerRegistry.of(cbConfig);
+        circuitBreaker = registry.circuitBreaker("visual-cb");
+
+        // Refill left box
+        for (int i = 0; i < 80; i++) {
+            leftBalls.add(createRandomBallInLeftBox());
+        }
+
+        // Reset controls
+        if (timeSlider != null) {
+            timeSlider.setValue(1.0);
+        }
+        paused = false;
+        if (playPauseButton != null) {
+            playPauseButton.setText("Pause");
+        }
+
+        // Redraw immediately to reflect reset
+        if (graphicsRef != null) {
+            draw(graphicsRef);
+        }
     }
 
     private void update(long now, double deltaSec) {
@@ -176,11 +341,13 @@ public class BallFlowApp extends Application {
                 double pipeEntryX = leftBoxX + BOX_WIDTH + (PIPE_WIDTH / 2.0);
                 double pipeEntryY = pipeTopY + pipeHeight / 2.0; // exact center of top pipe
                 inPipeL2R.add(new Ball(pipeEntryX, pipeEntryY, next.color, 80 + random.nextDouble() * 120, now, false, false));
+                // Count ball departure from the left box
+                totalDepartedLeft++;
             }
             lastSpawnL2RNs = now;
         }
 
-        // Move balls in the top pipe to the right; perform CB decision mid-pipe; on arrival apply outcome
+        // Move balls in the top pipe to the right; perform CB decision mid-pipe; on arrival determine outcome only (defer CB record)
         List<Ball> arrivedTop = new ArrayList<>();
         List<Ball> toRemoveFromPipe = new ArrayList<>();
 
@@ -204,7 +371,6 @@ public class BallFlowApp extends Application {
                     } catch (CallNotPermittedException e) {
                         // denied: start a short transition INSIDE the CB column from top pipe center to bottom pipe center
                         shortCircuitedCount++;
-                        addOutcome(Outcome.NOT_PERMITTED);
                         double topCenterY = pipeTopY + pipeHeight / 2.0;
                         double bottomCenterY = pipeBottomY + pipeHeight / 2.0;
                         long durationMs = 250L; // smooth morph duration
@@ -229,16 +395,14 @@ public class BallFlowApp extends Application {
             inPipeL2R.removeAll(arrivedTop);
             for (Ball b : arrivedTop) {
                 long durationMs = now - b.startMs;
-                // Only permitted balls reach here; simulate remote call outcome and record in CB
+                // Only permitted balls reach here; simulate remote call outcome but DO NOT record in CB yet
                 boolean failed = random.nextDouble() < failureProbability;
                 Outcome out;
                 Color squareColor;
                 if (failed) {
-                    circuitBreaker.onError(durationMs, TimeUnit.MILLISECONDS, new RuntimeException("simulated-failure"));
                     out = Outcome.FAILURE;
                     squareColor = Color.web("#ef4444");
                 } else {
-                    circuitBreaker.onSuccess(durationMs, TimeUnit.MILLISECONDS);
                     out = Outcome.SUCCESS;
                     squareColor = b.color;
                 }
@@ -257,7 +421,7 @@ public class BallFlowApp extends Application {
                 double startX = Math.min(b.x, rightBoxX + BOX_WIDTH - BALL_RADIUS - 6); // keep inside box edge
                 double startY = Math.min(Math.max(b.y, rightBoxY + BALL_RADIUS + 6), rightBoxY + BOX_HEIGHT - BALL_RADIUS - 6);
                 long morphDuration = 240L;
-                rightBoxMorphs.add(new RightBoxMorph(startX, startY, targetX, targetY, b.color, squareColor, out, true, now, morphDuration, 0.0));
+                rightBoxMorphs.add(new RightBoxMorph(startX, startY, targetX, targetY, b.color, squareColor, out, true, durationMs, now, morphDuration, 0.0));
             }
         }
 
@@ -267,7 +431,7 @@ public class BallFlowApp extends Application {
             Square s = inPipeL2RShort.get(i);
             double newX = s.x + s.speed * deltaSec;
             double newY = clampToPipe(s.y + wobble(deltaSec), pipeTopY, pipeHeight, SQUARE_SIZE / 2.0);
-            Square moved = new Square(newX, newY, s.color, s.speed, s.outcome, s.occupiesSlot);
+            Square moved = new Square(newX, newY, s.color, s.speed, s.outcome, s.occupiesSlot, null);
             inPipeL2RShort.set(i, moved);
             if (newX >= rightBoxX + BOX_WIDTH / 2.0 - BALL_RADIUS) {
                 arrivedShort.add(moved);
@@ -277,7 +441,7 @@ public class BallFlowApp extends Application {
             inPipeL2RShort.removeAll(arrivedShort);
             // deposit orange squares into right box
             for (Square s : arrivedShort) {
-                rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0, Outcome.NOT_PERMITTED, false));
+                rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0, Outcome.NOT_PERMITTED, false, null));
             }
         }
 
@@ -297,7 +461,7 @@ public class BallFlowApp extends Application {
             if (!finished.isEmpty()) {
                 for (ShortCircuitTransition t : finished) {
                     // inject orange square into bottom pipe at CB X and bottom center Y, preserving speed
-                    inPipeR2L.add(new Square(t.x, t.yEnd, SHORT_CIRCUIT_COLOR, t.speed, Outcome.NOT_PERMITTED, false));
+                    inPipeR2L.add(new Square(t.x, t.yEnd, SHORT_CIRCUIT_COLOR, t.speed, Outcome.NOT_PERMITTED, false, null));
                 }
                 shortCircuitTransitions.removeAll(finished);
             }
@@ -310,14 +474,17 @@ public class BallFlowApp extends Application {
                 RightBoxMorph m = rightBoxMorphs.get(i);
                 double elapsed = now - m.startMs;
                 double p = clamp(0.0, 1.0, elapsed / (double) m.durationMs);
-                rightBoxMorphs.set(i, new RightBoxMorph(m.xStart, m.yStart, m.xEnd, m.yEnd, m.ballColor, m.squareColor, m.outcome, m.occupiesSlot, m.startMs, m.durationMs, p));
+                rightBoxMorphs.set(i, new RightBoxMorph(m.xStart, m.yStart, m.xEnd, m.yEnd, m.ballColor, m.squareColor, m.outcome, m.occupiesSlot, m.callDurationMs, m.startMs, m.durationMs, p));
                 if (p >= 1.0) {
                     done.add(rightBoxMorphs.get(i));
                 }
             }
             if (!done.isEmpty()) {
                 for (RightBoxMorph m : done) {
-                    rightSquares.add(new Square(0, 0, m.squareColor, 0, m.outcome, m.occupiesSlot));
+                    rightSquares.add(new Square(0, 0, m.squareColor, 0, m.outcome, m.occupiesSlot, m.callDurationMs));
+                    // Count totals for right box when the morph completes (square is placed)
+                    if (m.outcome == Outcome.SUCCESS) totalRightSuccess++;
+                    else if (m.outcome == Outcome.FAILURE) totalRightFailure++;
                 }
                 rightBoxMorphs.removeAll(done);
             }
@@ -329,7 +496,7 @@ public class BallFlowApp extends Application {
             if (nextSq != null) {
                 double pipeEntryX = rightBoxX - (SQUARE_SIZE / 2.0) - 6; // start more to the right inside the pipe
                 double pipeEntryY = pipeBottomY + pipeHeight / 2.0; // exact center of bottom pipe
-                inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, nextSq.color, 80 + random.nextDouble() * 120, nextSq.outcome, nextSq.occupiesSlot));
+                inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, nextSq.color, 80 + random.nextDouble() * 120, nextSq.outcome, nextSq.occupiesSlot, nextSq.callDurationMs));
             }
             lastSpawnR2LNs = now;
         }
@@ -342,12 +509,17 @@ public class BallFlowApp extends Application {
             double newY = clampToPipe(s.y + wobble(deltaSec), pipeBottomY, pipeHeight, SQUARE_SIZE / 2.0);
 
             // When passing the CB column on the right side, update the buffer with this call's outcome once
-            boolean crossedCb = s.x > cbX && newX <= cbX;
+            // Count crossing when moving left past CB column; include equality to handle injected short-circuits at cbX
+            boolean crossedCb = s.x >= cbX && newX < cbX;
             Outcome outcomeForBuffer = s.outcome;
             boolean occupies = s.occupiesSlot;
             if (crossedCb) {
                 if (outcomeForBuffer != null) {
                     addOutcome(outcomeForBuffer);
+                    // Also update returned totals at the moment of crossing the CB on the way back
+                    if (outcomeForBuffer == Outcome.SUCCESS) totalReturnedSuccess++;
+                    else if (outcomeForBuffer == Outcome.FAILURE) totalReturnedFailure++;
+                    else if (outcomeForBuffer == Outcome.NOT_PERMITTED) totalReturnedNotPermitted++;
                     // clear outcome after accounting, so it won't be counted again
                     outcomeForBuffer = null;
                 }
@@ -356,9 +528,19 @@ public class BallFlowApp extends Application {
                     currentInFlight = Math.max(0, currentInFlight - 1);
                     occupies = false; // prevent double-decrement
                 }
+                // Register the outcome into the CB only now (when crossing CB on return)
+                if (s.callDurationMs != null) {
+                    if (s.outcome == Outcome.FAILURE) {
+                        circuitBreaker.onError(s.callDurationMs, TimeUnit.MILLISECONDS, new RuntimeException("simulated-failure"));
+                    } else if (s.outcome == Outcome.SUCCESS) {
+                        circuitBreaker.onSuccess(s.callDurationMs, TimeUnit.MILLISECONDS);
+                    }
+                }
             }
 
-            Square moved = new Square(newX, newY, s.color, s.speed, outcomeForBuffer, occupies);
+            // Clear duration once we have reported to CB to avoid duplicate reporting
+            Long nextDuration = crossedCb ? null : s.callDurationMs;
+            Square moved = new Square(newX, newY, s.color, s.speed, outcomeForBuffer, occupies, nextDuration);
             inPipeR2L.set(i, moved);
 
             // Stop a bit earlier before entering the left box: at the start of the bottom pipe plus small margin
@@ -369,7 +551,7 @@ public class BallFlowApp extends Application {
         }
         if (!arrivedBottom.isEmpty()) {
             inPipeR2L.removeAll(arrivedBottom);
-            leftSquares.addAll(arrivedBottom.stream().map(s -> new Square(0, 0, s.color, 0, null, false)).toList());
+            leftSquares.addAll(arrivedBottom.stream().map(s -> new Square(0, 0, s.color, 0, null, false, null)).toList());
         }
 
         // Gentle randomization of spawn intervals to make flow less uniform
@@ -458,6 +640,9 @@ public class BallFlowApp extends Application {
 
         // HUD overlay with CircuitBreaker state and failure rate
         hudRenderer.draw(g, circuitBreaker, currentInFlight, MAX_IN_FLIGHT, failureProbability, recentOutcomes, bufferVisualSize);
+
+        // Draw counters near boxes
+        drawBoxCounters(g, leftBoxX, leftBoxY, rightBoxX, rightBoxY);
     }
 
     private void drawCircuitBreakerIcon(GraphicsContext g, double pipeTopX, double pipeTopY, double pipeBottomY, double pipeLength, double pipeHeight) {
@@ -573,6 +758,23 @@ public class BallFlowApp extends Application {
 
     private void drawSquare(GraphicsContext g, double x, double y, Color color) {
         shapeRenderer.drawSquare(g, x, y, color);
+    }
+
+    private void drawBoxCounters(GraphicsContext g, double leftBoxX, double leftBoxY, double rightBoxX, double rightBoxY) {
+        // Left box: total departed counter
+        g.setFill(Color.color(1,1,1,0.9));
+        g.fillText("Departed: " + totalDepartedLeft, leftBoxX, Math.max(14, leftBoxY - 8));
+
+        // Right box: cumulative totals (success/failure) placed in the grid
+        double rx = rightBoxX;
+        double ry = Math.max(14, rightBoxY - 8);
+        g.fillText(String.format("Right box total — Success: %d  Failure: %d", totalRightSuccess, totalRightFailure), rx, ry);
+
+        // Left box bottom: totals of returned squares that crossed the CB on the way back
+        double lbx = leftBoxX;
+        double lby = leftBoxY + BOX_HEIGHT + 16;
+        g.fillText(String.format("Returned — Success: %d  Failure: %d  Not permitted: %d",
+                totalReturnedSuccess, totalReturnedFailure, totalReturnedNotPermitted), lbx, lby);
     }
 
     private void drawHud(GraphicsContext g) {

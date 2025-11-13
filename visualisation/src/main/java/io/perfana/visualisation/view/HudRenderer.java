@@ -17,7 +17,7 @@ public class HudRenderer {
                      double failureProbability,
                      Deque<Outcome> recentOutcomes,
                      int bufferVisualSize) {
-        drawHud(g, circuitBreaker, currentInFlight, maxInFlight, failureProbability);
+        drawHud(g, circuitBreaker, currentInFlight, maxInFlight, failureProbability, recentOutcomes);
         drawBufferPanel(g, recentOutcomes, bufferVisualSize);
     }
 
@@ -25,20 +25,30 @@ public class HudRenderer {
                          CircuitBreaker circuitBreaker,
                          int currentInFlight,
                          int maxInFlight,
-                         double failureProbability) {
+                         double failureProbability,
+                         Deque<Outcome> recentOutcomes) {
         double x = 20, y = 18;
         g.setFill(Color.color(1,1,1,0.9));
         g.fillText("CircuitBreaker: " + circuitBreaker.getState(), x, y);
 
         var metrics = circuitBreaker.getMetrics();
-        float failureRate = metrics.getFailureRate();
         float buffered = metrics.getNumberOfBufferedCalls();
         float notPermitted = metrics.getNumberOfNotPermittedCalls();
         float slowCallRate = metrics.getSlowCallRate();
 
-        float failureRateThreshold = 50.0f; // mirrors default in BallFlowApp
+        // Read actual config so visuals match the breaker behaviour precisely
+        float failureRateThreshold = circuitBreaker.getCircuitBreakerConfig().getFailureRateThreshold();
+        int minimumNumberOfCalls = circuitBreaker.getCircuitBreakerConfig().getMinimumNumberOfCalls();
 
-        g.fillText(String.format("Failure rate: %.1f%% (threshold %.0f%%)", failureRate, failureRateThreshold), x, y + 16);
+        // Compute failure rate from the same buffer we visualize so it stays in sync
+        int total = recentOutcomes.size();
+        int failures = 0;
+        for (Outcome o : recentOutcomes) {
+            if (o == Outcome.FAILURE) failures++;
+        }
+        double failureRateBuf = total > 0 ? (failures * 100.0) / total : 0.0;
+
+        g.fillText(String.format("Failure rate (buffer): %.1f%% (threshold %.0f%%)", failureRateBuf, failureRateThreshold), x, y + 16);
         g.fillText(String.format("Buffered calls: %.0f  Not permitted: %.0f  Slow rate: %.1f%%", buffered, notPermitted, slowCallRate), x, y + 32);
         g.fillText(String.format("In-flight (pool): %d / %d", currentInFlight, maxInFlight), x, y + 48);
         g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 64);
@@ -50,8 +60,14 @@ public class HudRenderer {
         double barH = 10;
         g.setFill(Color.color(1,1,1,0.15));
         g.fillRect(barX, barY, barW, barH);
-        double frac = clamp(0, 1, failureRate / 100.0);
-        Color barColor = failureRate >= failureRateThreshold ? Color.web("#ef4444") : Color.web("#22c55e");
+        double frac = clamp(0, 1, failureRateBuf / 100.0);
+        // Only paint the bar red if we have at least the configured minimum number of calls
+        // and the failure rate meets/exceeds the threshold; otherwise keep it green to avoid
+        // suggesting the breaker should open too early.
+        boolean thresholdActive = total >= minimumNumberOfCalls;
+        Color barColor = (thresholdActive && failureRateBuf >= failureRateThreshold)
+                ? Color.web("#ef4444")
+                : Color.web("#22c55e");
         g.setFill(barColor);
         g.fillRect(barX, barY, barW * frac, barH);
     }
