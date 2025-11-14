@@ -20,6 +20,7 @@ import javafx.geometry.Insets;
 import javafx.scene.layout.Priority;
 import javafx.scene.control.Button;
 import javafx.scene.control.Slider;
+import javafx.scene.control.Label;
 import javafx.scene.image.WritableImage;
 import javafx.scene.SnapshotParameters;
 import javafx.scene.transform.Scale;
@@ -74,6 +75,7 @@ public class BallFlowApp extends Application {
 
     // Time slider and frame history for scrubbing
     private Slider timeSlider;
+    private Slider failureSlider;
     private final List<WritableImage> frameHistory = new ArrayList<>();
     private static final int MAX_FRAMES = 480; // ~16s at 30 FPS capture (with CAPTURE_EVERY_N=2)
     private static final double SNAPSHOT_SCALE = 0.6; // improve readability while keeping memory moderate
@@ -147,7 +149,7 @@ public class BallFlowApp extends Application {
         this.canvasRef = canvas;
         root.setCenter(canvas);
 
-        // Controls bar at the bottom: Play/Pause, Restart, and Time Slider
+        // Controls bar at the bottom: Play/Pause, Restart, Failure slider, and Time Slider
         timeSlider = new Slider(0.0, 1.0, 1.0);
         timeSlider.setMaxWidth(Double.MAX_VALUE);
         // Track when user is dragging the slider to enter/exit scrubbing mode
@@ -162,7 +164,15 @@ public class BallFlowApp extends Application {
         restartButton = new Button("Restart");
         restartButton.setOnAction(e -> restartSimulation());
 
-        HBox controls = new HBox(10, playPauseButton, restartButton, timeSlider);
+        // Failure probability slider (0% .. 100%)
+        Label failLabel = new Label("Fail %");
+        failureSlider = new Slider(0, 100, failureProbability * 100.0);
+        failureSlider.setPrefWidth(160);
+        failureSlider.valueProperty().addListener((obs, oldV, newV) -> {
+            failureProbability = clamp(0.0, 1.0, newV.doubleValue() / 100.0);
+        });
+
+        HBox controls = new HBox(10, playPauseButton, restartButton, failLabel, failureSlider, timeSlider);
         HBox.setHgrow(timeSlider, Priority.ALWAYS);
         controls.setPadding(new Insets(8, 12, 8, 12));
         root.setBottom(controls);
@@ -287,7 +297,12 @@ public class BallFlowApp extends Application {
         lastSpawnL2RNs = 0L;
         lastSpawnR2LNs = 0L;
         lastProbUpdateMs = 0L;
-        failureProbability = 0.2;
+        // Preserve user-chosen failure probability (read from slider if available)
+        if (failureSlider != null) {
+            failureProbability = clamp(0.0, 1.0, failureSlider.getValue() / 100.0);
+        } else {
+            failureProbability = clamp(0.0, 1.0, failureProbability);
+        }
 
         // Recreate CircuitBreaker with same config
         CircuitBreakerConfig cbConfig = CircuitBreakerConfig.custom()
@@ -557,13 +572,7 @@ public class BallFlowApp extends Application {
             spawnIntervalR2LNs = (long) (300L + random.nextDouble() * 600L); // 300–900 ms
         }
 
-        // Slowly vary failure probability over time (simulate bad periods)
-        if (now - lastProbUpdateMs > 200L) { // update ~5 times/sec
-            double t = (now / 1000.0);
-            // base 0.2, oscillate +/-0.25 with a slow sine wave
-            failureProbability = clamp(0.0, 1.0, 0.2 + 0.25 * Math.sin(t * 0.5) + 0.05 * Math.sin(t * 2.7));
-            lastProbUpdateMs = now;
-        }
+        // User-controlled failure probability via slider: no automatic oscillation
     }
 
     private double wobble(double deltaSec) {
