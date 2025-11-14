@@ -406,18 +406,13 @@ public class BallFlowApp extends Application {
                     out = Outcome.SUCCESS;
                     squareColor = b.color;
                 }
-                // Create a morph animation in the right box from incoming ball position to the reserved grid slot
-                // Compute right box geometry and target slot based on current squares and pending morphs
+                // Create a morph animation that happens just inside the right box, in front of the BOTTOM pipe mouth
+                // (was top pipe). This makes the square move towards the lower tube for a smoother, more natural
+                // animation towards the return path.
                 double rightBoxY = (HEIGHT - BOX_HEIGHT) / 2.0;
-                int cols = (int) Math.max(1, Math.floor((BOX_WIDTH - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
-                int rows = (int) Math.max(1, Math.floor((BOX_HEIGHT - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
-                int index = rightSquares.size() + rightBoxMorphs.size();
-                // Place at the front of the return pipeline: bottom row first, then grow left→right and upwards
-                int rowFromBottom = index / cols; // 0 = bottom row in the box
-                int row = Math.min(rows - 1, rows - 1 - rowFromBottom);
-                int col = index % cols;
-                double targetX = rightBoxX + BALL_RADIUS + 6 + col * (BALL_RADIUS * 2 + 4);
-                double targetY = rightBoxY + BALL_RADIUS + 6 + row * (BALL_RADIUS * 2 + 4);
+                double targetX = rightBoxX + BALL_RADIUS + 6; // just inside the right box edge (in front of tube)
+                double targetY = pipeBottomY + pipeHeight / 2.0; // align with bottom pipe centerline
+
                 double startX = Math.min(b.x, rightBoxX + BOX_WIDTH - BALL_RADIUS - 6); // keep inside box edge
                 double startY = Math.min(Math.max(b.y, rightBoxY + BALL_RADIUS + 6), rightBoxY + BOX_HEIGHT - BALL_RADIUS - 6);
                 long morphDuration = 240L;
@@ -615,7 +610,8 @@ public class BallFlowApp extends Application {
 
         // Draw contents in boxes
         drawMixedInBox(g, leftBoxX, leftBoxY, leftBalls, leftSquares);
-        drawSquaresInBox(g, rightBoxX, rightBoxY, rightSquares);
+        // Draw waiting replies (squares) queued at the mouth of the LOWER pipe, not at the bottom grid
+        drawSquaresInBox(g, rightBoxX, rightBoxY, rightSquares, pipeBottomY, pipeHeight);
         // Draw right-box morphs on top for visibility
         drawRightBoxMorphs(g, rightBoxX, rightBoxY);
 
@@ -708,18 +704,33 @@ public class BallFlowApp extends Application {
         }
     }
 
-    private void drawSquaresInBox(GraphicsContext g, double boxX, double boxY, Deque<Square> squares) {
-        // Draw squares starting from the BOTTOM row, growing LEFT → RIGHT; when a row fills, continue one row up.
-        int cols = (int) Math.max(1, Math.floor((BOX_WIDTH - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
-        int rows = (int) Math.max(1, Math.floor((BOX_HEIGHT - 2 * BALL_RADIUS) / (BALL_RADIUS * 2 + 4)));
+    private void drawSquaresInBox(GraphicsContext g,
+                                   double boxX,
+                                   double boxY,
+                                   Deque<Square> squares,
+                                   double pipeBottomY,
+                                   double pipeHeight) {
+        // Visualise queued replies right in front of the LOWER pipe mouth, in a single horizontal queue
+        // along the pipe centerline. Do NOT stack/wrap vertically; extend horizontally inside the right box.
+
+        if (squares.isEmpty()) return;
+
+        // Queue layout parameters
+        double gap = 4.0;
+        double mouthXInside = boxX + BALL_RADIUS + 6; // left inner edge of the right box (pipe mouth)
+        double yCenter = pipeBottomY + pipeHeight / 2.0; // align with bottom pipe centerline
+
+        // Right inner bound (keep drawings inside the right box visual area)
+        double maxX = boxX + BOX_WIDTH - BALL_RADIUS - 6;
+
         int index = 0;
         for (Square s : squares) {
-            int rowFromBottom = index / cols; // 0 = bottom row
-            if (rowFromBottom >= rows) break; // out of vertical space
-            int row = rows - 1 - rowFromBottom; // convert to top-based index for y
-            int col = index % cols;
-            double x = boxX + BALL_RADIUS + 6 + col * (BALL_RADIUS * 2 + 4);
-            double y = boxY + BALL_RADIUS + 6 + row * (BALL_RADIUS * 2 + 4);
+            double x = mouthXInside + index * (SQUARE_SIZE + gap);
+            if (x > maxX) {
+                // Stop drawing beyond the right inner bound; queue remains a single line
+                break;
+            }
+            double y = yCenter;
             drawSquare(g, x, y, s.color);
             index++;
         }
