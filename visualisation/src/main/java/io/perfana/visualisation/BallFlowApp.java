@@ -53,7 +53,7 @@ public class BallFlowApp extends Application {
     private final ShapeRenderer shapeRenderer = new ShapeRenderer();
 
     private static final double WIDTH = 900;
-    private static final double HEIGHT = 600; // moved boxes slightly down so top labels sit above boxes and below HUD
+    private static final double HEIGHT = 640; // move boxes further down to avoid overlap with lower HUD elements
     private static final double CONTROL_BAR_HEIGHT = 48;
 
     private static final double BOX_MARGIN = 40;
@@ -103,6 +103,8 @@ public class BallFlowApp extends Application {
     private long cbOpenRemainingMs = -1L;
     // Diagnostics: count how many NOT_PERMITTED events occurred since the moment CB opened
     private long deniedSinceOpen = 0L;
+    // Visual cue window (simulation ms) to highlight buffer reset after entering HALF_OPEN
+    private long bufferClearedFlashUntilMs = -1L;
 
     private record Ball(double x, double y, Color color, double speed, long startMs, boolean cbChecked, boolean shortCircuited) {}
     private record Square(double x, double y, Color color, double speed, Outcome outcome, boolean occupiesSlot, Long callDurationMs) {}
@@ -341,6 +343,7 @@ public class BallFlowApp extends Application {
         lastSpawnR2LNs = 0L;
         lastProbUpdateMs = 0L;
         simElapsedMs = 0L; // reset simulation clock
+        bufferClearedFlashUntilMs = -1L; // clear any pending flash
         // Preserve user-chosen failure probability (read from slider if available)
         if (failureSlider != null) {
             failureProbability = clamp(0.0, 1.0, failureSlider.getValue() / 100.0);
@@ -398,17 +401,24 @@ public class BallFlowApp extends Application {
         pub.onStateTransition(ev -> {
             String tr = ev.getStateTransition().toString();
             long now = System.currentTimeMillis();
-            if (tr.endsWith("_TO_OPEN")) {
+            if (tr.endsWith("to OPEN")) {
                 cbOpenUntilMs = now + cbOpenWaitMs;
                 cbOpenRemainingMs = cbOpenWaitMs; // start pausable countdown
                 deniedSinceOpen = 0L; // reset counter when entering OPEN
                 lastCbReason = lastCbReason != null ? lastCbReason : "threshold reached";
                 pushCbEvent("STATE " + tr + " — wait " + (cbOpenWaitMs/1000.0) + "s");
+            } else if (tr.endsWith("to HALF_OPEN")) {
+                // When entering HALF_OPEN, the Resilience4j metrics window effectively restarts
+                // for trial calls. Clear the visual failure buffer to make this explicit.
+                recentOutcomes.clear();
+                pushCbEvent("STATE " + tr + " — buffer cleared for trial window");
+                // Start a short visual flash so the reset is clearly visible
+                bufferClearedFlashUntilMs = simElapsedMs + 3000; // 3 seconds from now in simulation time
             } else {
                 // any other transition
                 pushCbEvent("STATE " + tr);
                 // If we are transitioning from OPEN to something else, stop the countdown
-                if (tr.startsWith("OPEN_TO_")) {
+                if (tr.startsWith("OPEN to")) {
                     cbOpenUntilMs = -1L;
                     cbOpenRemainingMs = -1L;
                     deniedSinceOpen = 0L; // clear when leaving OPEN as well
@@ -441,7 +451,8 @@ public class BallFlowApp extends Application {
     }
 
     private void pushCbEvent(String s) {
-        String msg = System.currentTimeMillis() + ": " + s;
+        // Prefix with simulation clock milliseconds so HUD timestamps match the on-screen mm:ss clock
+        String msg = simElapsedMs + ": " + s;
         cbEvents.addFirst(msg);
         while (cbEvents.size() > MAX_CB_EVENTS) cbEvents.removeLast();
     }
@@ -797,7 +808,18 @@ public class BallFlowApp extends Application {
                 openCountdownSec = rem / 1000.0;
             }
         }
-        hudRenderer.draw(g, circuitBreaker, currentInFlight, MAX_IN_FLIGHT, failureProbability, recentOutcomes, bufferVisualSize, openCountdownSec, cbEvents, simElapsedMs);
+        hudRenderer.draw(
+                g,
+                circuitBreaker,
+                currentInFlight,
+                MAX_IN_FLIGHT,
+                failureProbability,
+                recentOutcomes,
+                bufferVisualSize,
+                openCountdownSec,
+                cbEvents,
+                simElapsedMs,
+                bufferClearedFlashUntilMs);
 
         // Draw counters near boxes
         drawBoxCounters(g, leftBoxX, leftBoxY, rightBoxX, rightBoxY);

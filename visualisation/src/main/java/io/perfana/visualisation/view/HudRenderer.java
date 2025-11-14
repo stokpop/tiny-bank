@@ -23,9 +23,11 @@ public class HudRenderer {
                      int bufferVisualSize,
                      Double openCountdownSec,
                      Deque<String> cbEvents,
-                     long simElapsedMs) {
+                     long simElapsedMs,
+                     long bufferClearedFlashUntilMs) {
         drawHud(g, circuitBreaker, currentInFlight, maxInFlight, failureProbability, recentOutcomes, openCountdownSec);
-        drawBufferPanel(g, recentOutcomes, bufferVisualSize);
+        boolean flashActive = bufferClearedFlashUntilMs >= 0 && simElapsedMs <= bufferClearedFlashUntilMs;
+        drawBufferPanel(g, recentOutcomes, bufferVisualSize, flashActive);
         drawEventPanel(g, cbEvents);
         drawClock(g, simElapsedMs);
     }
@@ -83,30 +85,71 @@ public class HudRenderer {
                 : Color.web("#22c55e");
         g.setFill(barColor);
         g.fillRect(barX, barY, barW * frac, barH);
+
+        // Draw a threshold marker (vertical tick) to indicate the CB failure rate threshold position
+        double threshFrac = clamp(0, 1, failureRateThreshold / 100.0);
+        double tickX = barX + barW * threshFrac;
+        g.setStroke(Color.color(1,1,1,0.85));
+        g.setLineWidth(1.0);
+        g.strokeLine(tickX, barY - 2, tickX, barY + barH + 2);
+
+        // Small legend explaining the bar semantics so users understand the red/green behaviour
+        // Keep it concise to avoid cluttering the HUD.
+        String legend = "Bar = failure rate (buffer), tick = CB threshold; red when ≥ threshold and min calls reached";
+        g.setFill(Color.color(1,1,1,0.75));
+        // Move legend a bit further down to avoid overlapping the events text on the right
+        g.fillText(legend, barX, barY + barH + 26);
     }
 
-    private void drawBufferPanel(GraphicsContext g, Deque<Outcome> recentOutcomes, int bufferVisualSize) {
+    private void drawBufferPanel(GraphicsContext g, Deque<Outcome> recentOutcomes, int bufferVisualSize, boolean flashActive) {
         // Panel near HUD (top-left)
-        double x = 260, y = 14;
+        double x = 260, y = 10; // move a bit up so squares don't touch the slow rate text
         g.setFill(Color.color(1,1,1,0.9));
         g.fillText("Buffer (latest " + bufferVisualSize + ")", x, y);
+        if (flashActive) {
+            // Show a short-lived badge to make the reset clearly visible
+            g.setFill(Color.web("#f59e0b"));
+            g.fillText("CLEARED", x + 140, y); // small badge next to the title
+        }
         double cell = 10;
         double pad = 2;
         double startY = y + 6;
+
+        // Optional highlight border while flashing
+        if (flashActive) {
+            double panelW = bufferVisualSize * (cell + pad) - pad;
+            double panelH = cell + 8;
+            g.setStroke(Color.color(1,1,1,0.6));
+            g.setLineWidth(1.5);
+            g.strokeRect(x - 4, startY + 6, panelW + 8, panelH);
+        }
+
+        // Draw exactly bufferVisualSize cells: colored for available data, gray outline for unavailable
+        int available = recentOutcomes.size();
         int idx = 0;
-        for (Outcome o : recentOutcomes) {
-            double cx = x + (idx % bufferVisualSize) * (cell + pad);
-            double cy = startY + 10;
-            Color c = switch (o) {
-                case SUCCESS -> Color.web("#22c55e");
-                case FAILURE -> Color.web("#ef4444");
-                case NOT_PERMITTED -> Color.web("#f59e0b");
-            };
-            g.setFill(c);
-            g.fillRect(cx, cy, cell, cell);
-            g.setStroke(Color.color(0,0,0,0.4));
-            g.strokeRect(cx, cy, cell, cell);
-            idx++;
+        for (; idx < bufferVisualSize; idx++) {
+            double cx = x + idx * (cell + pad);
+            // Move the squares themselves a few pixels up to increase spacing from the slow rate text
+            double cy = startY + 6;
+            if (idx < available) {
+                // Draw filled square for existing outcome
+                Outcome o = recentOutcomes.stream().skip(idx).findFirst().orElse(null);
+                if (o != null) {
+                    Color c = switch (o) {
+                        case SUCCESS -> Color.web("#22c55e");
+                        case FAILURE -> Color.web("#ef4444");
+                        case NOT_PERMITTED -> Color.web("#f59e0b");
+                    };
+                    g.setFill(c);
+                    g.fillRect(cx, cy, cell, cell);
+                    g.setStroke(Color.color(0,0,0,0.4));
+                    g.strokeRect(cx, cy, cell, cell);
+                }
+            } else {
+                // Placeholder: gray outline only to indicate no data yet
+                g.setStroke(flashActive ? Color.color(1,1,1,0.8) : Color.color(1,1,1,0.35));
+                g.strokeRect(cx, cy, cell, cell);
+            }
         }
     }
 
@@ -126,14 +169,18 @@ public class HudRenderer {
     }
 
     private String formatEventWithTimestamp(String ev) {
+        // The event prefix is simulation elapsed milliseconds (not epoch). Format to [mm:ss].
         try {
             int idx = ev.indexOf(':');
             if (idx > 0) {
                 String millisStr = ev.substring(0, idx).trim();
                 long ms = Long.parseLong(millisStr);
+                if (ms < 0) ms = 0;
+                long totalSeconds = ms / 1000L;
+                long minutes = totalSeconds / 60L;
+                long seconds = totalSeconds % 60L;
+                String mmss = String.format("%02d:%02d", minutes, seconds);
                 String msg = ev.substring(Math.min(idx + 2, ev.length()));
-                LocalTime lt = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalTime();
-                String mmss = lt.format(DateTimeFormatter.ofPattern("mm:ss"));
                 return "[" + mmss + "] " + msg;
             }
         } catch (Exception ignored) {
