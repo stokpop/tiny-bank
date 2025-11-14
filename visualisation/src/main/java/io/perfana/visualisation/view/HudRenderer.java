@@ -7,6 +7,10 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 
 import java.util.Deque;
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 public class HudRenderer {
 
@@ -16,9 +20,14 @@ public class HudRenderer {
                      int maxInFlight,
                      double failureProbability,
                      Deque<Outcome> recentOutcomes,
-                     int bufferVisualSize) {
-        drawHud(g, circuitBreaker, currentInFlight, maxInFlight, failureProbability, recentOutcomes);
+                     int bufferVisualSize,
+                     Double openCountdownSec,
+                     Deque<String> cbEvents,
+                     long simElapsedMs) {
+        drawHud(g, circuitBreaker, currentInFlight, maxInFlight, failureProbability, recentOutcomes, openCountdownSec);
         drawBufferPanel(g, recentOutcomes, bufferVisualSize);
+        drawEventPanel(g, cbEvents);
+        drawClock(g, simElapsedMs);
     }
 
     private void drawHud(GraphicsContext g,
@@ -26,7 +35,8 @@ public class HudRenderer {
                          int currentInFlight,
                          int maxInFlight,
                          double failureProbability,
-                         Deque<Outcome> recentOutcomes) {
+                         Deque<Outcome> recentOutcomes,
+                         Double openCountdownSec) {
         double x = 20, y = 18;
         g.setFill(Color.color(1,1,1,0.9));
         g.fillText("CircuitBreaker: " + circuitBreaker.getState(), x, y);
@@ -52,10 +62,13 @@ public class HudRenderer {
         g.fillText(String.format("Buffered calls: %.0f  Not permitted: %.0f  Slow rate: %.1f%%", buffered, notPermitted, slowCallRate), x, y + 32);
         g.fillText(String.format("In-flight (pool): %d / %d", currentInFlight, maxInFlight), x, y + 48);
         g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 64);
+        if (circuitBreaker.getState() == CircuitBreaker.State.OPEN && openCountdownSec != null) {
+            g.fillText(String.format("Open wait remaining: %.1fs", Math.max(0.0, openCountdownSec)), x, y + 80);
+        }
 
         // Bar showing failure rate vs threshold
         double barX = x;
-        double barY = y + 76;
+        double barY = y + 92;
         double barW = 220;
         double barH = 10;
         g.setFill(Color.color(1,1,1,0.15));
@@ -95,6 +108,53 @@ public class HudRenderer {
             g.strokeRect(cx, cy, cell, cell);
             idx++;
         }
+    }
+
+    private void drawEventPanel(GraphicsContext g, Deque<String> cbEvents) {
+        if (cbEvents == null || cbEvents.isEmpty()) return;
+        double x = 420, y = 14;
+        g.setFill(Color.color(1,1,1,0.9));
+        g.fillText("CB events (latest)", x, y);
+        int maxLines = 8;
+        int i = 0;
+        for (String ev : cbEvents) {
+            if (i >= maxLines) break;
+            String line = formatEventWithTimestamp(ev);
+            g.fillText(line, x, y + 14 + (i * 14));
+            i++;
+        }
+    }
+
+    private String formatEventWithTimestamp(String ev) {
+        try {
+            int idx = ev.indexOf(':');
+            if (idx > 0) {
+                String millisStr = ev.substring(0, idx).trim();
+                long ms = Long.parseLong(millisStr);
+                String msg = ev.substring(Math.min(idx + 2, ev.length()));
+                LocalTime lt = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalTime();
+                String mmss = lt.format(DateTimeFormatter.ofPattern("mm:ss"));
+                return "[" + mmss + "] " + msg;
+            }
+        } catch (Exception ignored) {
+        }
+        return ev; // fallback
+    }
+
+    private void drawClock(GraphicsContext g, long simElapsedMs) {
+        double padding = 16.0;
+        double canvasW = g.getCanvas().getWidth();
+        double xRight = canvasW - padding;
+        double y = 18.0;
+        if (simElapsedMs < 0) simElapsedMs = 0;
+        long totalSeconds = simElapsedMs / 1000L;
+        long minutes = totalSeconds / 60L;
+        long seconds = totalSeconds % 60L;
+        String mmss = String.format("%02d:%02d", minutes, seconds);
+        g.setFill(Color.color(1,1,1,0.9));
+        // Right-align by subtracting approximate text width using a monospace-like assumption (not exact but sufficient)
+        // Alternatively, position slightly to the left of the right padding for safety
+        g.fillText(mmss, xRight - 40, y); // 40px offset to keep within view
     }
 
     private static double clamp(double min, double max, double v) {

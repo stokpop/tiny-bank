@@ -4,6 +4,7 @@ import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.circuitbreaker.event.*;
 import io.perfana.visualisation.model.Outcome;
 import io.perfana.visualisation.view.HudRenderer;
 import io.perfana.visualisation.view.ShapeRenderer;
@@ -52,7 +53,7 @@ public class BallFlowApp extends Application {
     private final ShapeRenderer shapeRenderer = new ShapeRenderer();
 
     private static final double WIDTH = 900;
-    private static final double HEIGHT = 560; // increased to prevent left box from overlapping HUD
+    private static final double HEIGHT = 600; // moved boxes slightly down so top labels sit above boxes and below HUD
     private static final double CONTROL_BAR_HEIGHT = 48;
 
     private static final double BOX_MARGIN = 40;
@@ -77,16 +78,31 @@ public class BallFlowApp extends Application {
     private Slider timeSlider;
     private Slider failureSlider;
     private final List<WritableImage> frameHistory = new ArrayList<>();
-    private static final int MAX_FRAMES = 480; // ~16s at 30 FPS capture (with CAPTURE_EVERY_N=2)
-    private static final double SNAPSHOT_SCALE = 0.6; // improve readability while keeping memory moderate
-    private static final boolean IMAGE_SMOOTHING_IN_SCRUB = false; // keep text crisp when scaling up
-    private static final int CAPTURE_EVERY_N = 2; // capture decimation to extend history length
+    // Capture full-resolution frames for crisp text when scrubbing.
+    // Reduce history size and decimate captures to keep memory in check while preserving time window.
+    private static final int MAX_FRAMES = 240; // full-res frames; adjust to avoid excessive memory usage
+    private static final double SNAPSHOT_SCALE = 1.0; // capture at native canvas resolution for maximum clarity
+    private static final boolean IMAGE_SMOOTHING_IN_SCRUB = false; // keep text crisp when rendering snapshots
+    private static final int CAPTURE_EVERY_N = 3; // fewer captures to extend scroll-back duration at full res
     private boolean scrubbing = false;
     private boolean paused = false;
     private Button playPauseButton;
     private Button restartButton;
     private Canvas canvasRef;
     private GraphicsContext graphicsRef;
+    // Simulation clock (ms) that starts at 00:00 and advances only while not paused
+    private long simElapsedMs = 0L;
+    
+    // CB diagnostics & countdown
+    private final Deque<String> cbEvents = new ArrayDeque<>();
+    private static final int MAX_CB_EVENTS = 12;
+    private long cbOpenUntilMs = -1L; // epoch ms when OPEN wait ends; -1 means inactive
+    private long cbOpenWaitMs = 6000L;   // cached waitDurationInOpenState in ms (default 6s)
+    private String lastCbReason = null; // last known cause hint
+    // Pausable countdown remaining time for OPEN state; managed in update() so it freezes when paused
+    private long cbOpenRemainingMs = -1L;
+    // Diagnostics: count how many NOT_PERMITTED events occurred since the moment CB opened
+    private long deniedSinceOpen = 0L;
 
     private record Ball(double x, double y, Color color, double speed, long startMs, boolean cbChecked, boolean shortCircuited) {}
     private record Square(double x, double y, Color color, double speed, Outcome outcome, boolean occupiesSlot, Long callDurationMs) {}
@@ -135,10 +151,23 @@ public class BallFlowApp extends Application {
     private long totalReturnedNotPermitted = 0L;
 
     private long lastSpawnL2RNs = 0;
-    private long spawnIntervalL2RNs = 500L; // 0.5s default, now in milliseconds
+    private long spawnIntervalL2RNs = 500L; // will be re-sampled from Gaussian after each spawn
 
     private long lastSpawnR2LNs = 0;
     private long spawnIntervalR2LNs = 600L; // 0.6s default, now in milliseconds
+
+    // When CB is OPEN, many balls can reach the CB at once causing a burst of NOT_PERMITTED.
+    // Introduce a simple rate limiter so acquirePermission attempts (and thus NOT_PERMITTED events)
+    // are spaced roughly at the incoming arrival cadence.
+    private long lastCbAttemptMs = 0L;
+    private long cbAttemptSpacingMs = 500L; // initialized from spawnIntervalL2RNs at startup/restart
+
+    // Gaussian inter-arrival configuration for incoming requests (left -> right)
+    // Mean and standard deviation in milliseconds with sensible clamping to avoid extremes
+    private static final long L2R_MEAN_MS = 500L;
+    private static final long L2R_STDDEV_MS = 150L;
+    private static final long L2R_MIN_MS = 120L;
+    private static final long L2R_MAX_MS = 1200L;
 
     @Override
     public void start(Stage stage) {
@@ -188,17 +217,24 @@ public class BallFlowApp extends Application {
                 .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
                 .slidingWindowSize(5)
                 .minimumNumberOfCalls(4)
-                .waitDurationInOpenState(Duration.ofSeconds(3))
+                .waitDurationInOpenState(Duration.ofSeconds(6))
                 .permittedNumberOfCallsInHalfOpenState(5)
                 .automaticTransitionFromOpenToHalfOpenEnabled(true)
                 .build();
         CircuitBreakerRegistry registry = CircuitBreakerRegistry.of(cbConfig);
         circuitBreaker = registry.circuitBreaker("visual-cb");
+        // Subscribe to events for countdown + diagnostics
+        cbOpenWaitMs = 6000L; // keep in sync with builder waitDurationInOpenState above
+        subscribeCircuitBreakerEvents();
 
         // Pre-fill left box with more balls for a denser start
         for (int i = 0; i < 80; i++) {
             leftBalls.add(createRandomBallInLeftBox());
         }
+
+        // Initialize first spawn interval using Gaussian sampling so arrivals are not uniform
+        spawnIntervalL2RNs = sampleGaussianMs(L2R_MEAN_MS, L2R_STDDEV_MS, L2R_MIN_MS, L2R_MAX_MS);
+        cbAttemptSpacingMs = spawnIntervalL2RNs;
 
         GraphicsContext g = canvas.getGraphicsContext2D();
         this.graphicsRef = g;
@@ -227,7 +263,9 @@ public class BallFlowApp extends Application {
                             captureTick = (captureTick + 1) % CAPTURE_EVERY_N;
                             if (captureTick == 0) {
                                 SnapshotParameters params = new SnapshotParameters();
-                                params.setTransform(new Scale(SNAPSHOT_SCALE, SNAPSHOT_SCALE));
+                                if (SNAPSHOT_SCALE != 1.0) {
+                                    params.setTransform(new Scale(SNAPSHOT_SCALE, SNAPSHOT_SCALE));
+                                }
                                 WritableImage snapshot = canvas.snapshot(params, null);
                                 frameHistory.add(snapshot);
                                 if (frameHistory.size() > MAX_FRAMES) {
@@ -242,10 +280,8 @@ public class BallFlowApp extends Application {
                         // Optionally redraw HUD overlays if needed
                         draw(g);
                     }
-                    // Stick slider to the end while playing or paused
-                    if (!timeSlider.isValueChanging()) {
-                        timeSlider.setValue(1.0);
-                    }
+                    // Do not force the time slider to the end; keep the user's last position even after releasing
+                    // the mouse. The slider now acts purely as a scrub control without auto-snapping.
                 } else {
                     // Scrubbing mode: render the selected historical frame image
                     if (!frameHistory.isEmpty()) {
@@ -254,10 +290,17 @@ public class BallFlowApp extends Application {
                         int idx = (int) Math.round(v * (size - 1));
                         idx = Math.max(0, Math.min(size - 1, idx));
                         WritableImage img = frameHistory.get(idx);
-                        // Draw the historical image scaled back to canvas size, with optional smoothing control
+                        // Draw the historical image with maximum sharpness. If sizes match, draw 1:1 to avoid resampling.
                         boolean prevSmoothing = g.isImageSmoothing();
                         g.setImageSmoothing(IMAGE_SMOOTHING_IN_SCRUB);
-                        g.drawImage(img, 0, 0, img.getWidth(), img.getHeight(), 0, 0, canvas.getWidth(), canvas.getHeight());
+                        double cw = canvas.getWidth();
+                        double ch = canvas.getHeight();
+                        if (Math.abs(img.getWidth() - cw) < 0.5 && Math.abs(img.getHeight() - ch) < 0.5) {
+                            g.drawImage(img, 0, 0);
+                        } else {
+                            // Fallback scaling (e.g., HiDPI scenarios) — still with smoothing off for crisp text
+                            g.drawImage(img, 0, 0, img.getWidth(), img.getHeight(), 0, 0, cw, ch);
+                        }
                         g.setImageSmoothing(prevSmoothing);
                     }
                 }
@@ -297,6 +340,7 @@ public class BallFlowApp extends Application {
         lastSpawnL2RNs = 0L;
         lastSpawnR2LNs = 0L;
         lastProbUpdateMs = 0L;
+        simElapsedMs = 0L; // reset simulation clock
         // Preserve user-chosen failure probability (read from slider if available)
         if (failureSlider != null) {
             failureProbability = clamp(0.0, 1.0, failureSlider.getValue() / 100.0);
@@ -310,17 +354,29 @@ public class BallFlowApp extends Application {
                 .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
                 .slidingWindowSize(5)
                 .minimumNumberOfCalls(4)
-                .waitDurationInOpenState(Duration.ofSeconds(3))
+                .waitDurationInOpenState(Duration.ofSeconds(6))
                 .permittedNumberOfCallsInHalfOpenState(5)
                 .automaticTransitionFromOpenToHalfOpenEnabled(true)
                 .build();
         CircuitBreakerRegistry registry = CircuitBreakerRegistry.of(cbConfig);
         circuitBreaker = registry.circuitBreaker("visual-cb");
+        // Reset CB diagnostics and re-subscribe
+        cbEvents.clear();
+        cbOpenUntilMs = -1L;
+        cbOpenRemainingMs = -1L;
+        lastCbReason = null;
+        cbOpenWaitMs = 6000L; // keep consistent with builder
+        subscribeCircuitBreakerEvents();
 
         // Refill left box
         for (int i = 0; i < 80; i++) {
             leftBalls.add(createRandomBallInLeftBox());
         }
+
+        // Re-initialize Gaussian inter-arrival after restart
+        spawnIntervalL2RNs = sampleGaussianMs(L2R_MEAN_MS, L2R_STDDEV_MS, L2R_MIN_MS, L2R_MAX_MS);
+        cbAttemptSpacingMs = spawnIntervalL2RNs;
+        lastCbAttemptMs = 0L;
 
         // Reset controls
         if (timeSlider != null) {
@@ -335,6 +391,59 @@ public class BallFlowApp extends Application {
         if (graphicsRef != null) {
             draw(graphicsRef);
         }
+    }
+
+    private void subscribeCircuitBreakerEvents() {
+        CircuitBreaker.EventPublisher pub = circuitBreaker.getEventPublisher();
+        pub.onStateTransition(ev -> {
+            String tr = ev.getStateTransition().toString();
+            long now = System.currentTimeMillis();
+            if (tr.endsWith("_TO_OPEN")) {
+                cbOpenUntilMs = now + cbOpenWaitMs;
+                cbOpenRemainingMs = cbOpenWaitMs; // start pausable countdown
+                deniedSinceOpen = 0L; // reset counter when entering OPEN
+                lastCbReason = lastCbReason != null ? lastCbReason : "threshold reached";
+                pushCbEvent("STATE " + tr + " — wait " + (cbOpenWaitMs/1000.0) + "s");
+            } else {
+                // any other transition
+                pushCbEvent("STATE " + tr);
+                // If we are transitioning from OPEN to something else, stop the countdown
+                if (tr.startsWith("OPEN_TO_")) {
+                    cbOpenUntilMs = -1L;
+                    cbOpenRemainingMs = -1L;
+                    deniedSinceOpen = 0L; // clear when leaving OPEN as well
+                }
+            }
+            // clear last reason after we used it
+            lastCbReason = null;
+        });
+        pub.onError(ev -> {
+            lastCbReason = "error";
+            pushCbEvent("ERROR duration=" + ev.getElapsedDuration().toMillis() + "ms");
+        });
+        pub.onSuccess(ev -> {
+            lastCbReason = "success";
+            pushCbEvent("SUCCESS duration=" + ev.getElapsedDuration().toMillis() + "ms");
+        });
+        pub.onCallNotPermitted(ev -> {
+            lastCbReason = "not permitted";
+            deniedSinceOpen++;
+            pushCbEvent("NOT_PERMITTED (" + deniedSinceOpen + " since OPEN)");
+        });
+        pub.onFailureRateExceeded(ev -> {
+            lastCbReason = "failure rate " + String.format("%.1f%%", ev.getFailureRate());
+            pushCbEvent("FAILURE_RATE_EXCEEDED " + String.format("%.1f%%", ev.getFailureRate()));
+        });
+        pub.onSlowCallRateExceeded(ev -> {
+            pushCbEvent("SLOW_RATE_EXCEEDED " + String.format("%.1f%%", ev.getSlowCallRate()));
+        });
+        pub.onReset(ev -> pushCbEvent("RESET"));
+    }
+
+    private void pushCbEvent(String s) {
+        String msg = System.currentTimeMillis() + ": " + s;
+        cbEvents.addFirst(msg);
+        while (cbEvents.size() > MAX_CB_EVENTS) cbEvents.removeLast();
     }
 
     private void update(long now, double deltaSec) {
@@ -360,6 +469,9 @@ public class BallFlowApp extends Application {
                 totalDepartedLeft++;
             }
             lastSpawnL2RNs = now;
+            // Sample next inter-arrival from a Gaussian distribution (clamped)
+            spawnIntervalL2RNs = sampleGaussianMs(L2R_MEAN_MS, L2R_STDDEV_MS, L2R_MIN_MS, L2R_MAX_MS);
+            cbAttemptSpacingMs = spawnIntervalL2RNs; // keep CB attempt pacing aligned to arrival cadence
         }
 
         // Move balls in the top pipe to the right; perform CB decision mid-pipe; on arrival determine outcome only (defer CB record)
@@ -378,20 +490,29 @@ public class BallFlowApp extends Application {
                     // No capacity: hold at CB icon; try again next frame
                     moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startMs, false, false);
                 } else {
-                    try {
-                        circuitBreaker.acquirePermission();
-                        // permitted: consume a pool slot and continue as ball
-                        currentInFlight++;
-                        moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startMs, true, false);
-                    } catch (CallNotPermittedException e) {
-                        // denied: start a short transition INSIDE the CB column from top pipe center to bottom pipe center
-                        shortCircuitedCount++;
-                        double topCenterY = pipeTopY + pipeHeight / 2.0;
-                        double bottomCenterY = pipeBottomY + pipeHeight / 2.0;
-                        long durationMs = 250L; // smooth morph duration
-                        shortCircuitTransitions.add(new ShortCircuitTransition(cbX, topCenterY, bottomCenterY, moved.speed, now, durationMs, topCenterY));
-                        toRemoveFromPipe.add(b);
-                        continue; // don't keep the ball in top pipe
+                    boolean breakerOpen = circuitBreaker.getState() == CircuitBreaker.State.OPEN;
+                    // If OPEN, only allow an attempt according to rate limiter; otherwise hold at CB edge
+                    if (breakerOpen && (now - lastCbAttemptMs) < cbAttemptSpacingMs) {
+                        moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startMs, false, false);
+                    } else {
+                        if (breakerOpen) {
+                            lastCbAttemptMs = now;
+                        }
+                        try {
+                            circuitBreaker.acquirePermission();
+                            // permitted: consume a pool slot and continue as ball
+                            currentInFlight++;
+                            moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startMs, true, false);
+                        } catch (CallNotPermittedException e) {
+                            // denied: start a short transition INSIDE the CB column from top pipe center to bottom pipe center
+                            shortCircuitedCount++;
+                            double topCenterY = pipeTopY + pipeHeight / 2.0;
+                            double bottomCenterY = pipeBottomY + pipeHeight / 2.0;
+                            long durationMs = 250L; // smooth morph duration
+                            shortCircuitTransitions.add(new ShortCircuitTransition(cbX, topCenterY, bottomCenterY, moved.speed, now, durationMs, topCenterY));
+                            toRemoveFromPipe.add(b);
+                            continue; // don't keep the ball in top pipe
+                        }
                     }
                 }
             }
@@ -564,15 +685,35 @@ public class BallFlowApp extends Application {
             leftSquares.addAll(arrivedBottom.stream().map(s -> new Square(0, 0, s.color, 0, null, false, null)).toList());
         }
 
-        // Gentle randomization of spawn intervals to make flow less uniform
-        if (random.nextDouble() < 0.01) {
-            spawnIntervalL2RNs = (long) (300L + random.nextDouble() * 600L); // 300–900 ms
-        }
-        if (random.nextDouble() < 0.01) {
-            spawnIntervalR2LNs = (long) (300L + random.nextDouble() * 600L); // 300–900 ms
-        }
+        // Note: R2L spawn uses a fixed interval; only incoming (L2R) arrivals are Gaussian per requirement.
 
         // User-controlled failure probability via slider: no automatic oscillation
+
+        // Advance simulation clock — update() is not called while paused, so this only
+        // progresses during play.
+        simElapsedMs += Math.round(deltaSec * 1000.0);
+
+        // Update OPEN-state countdown in a pausable way. This runs only when not paused,
+        // because update() is skipped while paused via the AnimationTimer logic.
+        if (circuitBreaker.getState() == CircuitBreaker.State.OPEN) {
+            if (cbOpenRemainingMs < 0 && cbOpenUntilMs > 0) {
+                // Fallback: if we have an absolute deadline but no remaining counter, initialize it.
+                cbOpenRemainingMs = Math.max(0L, cbOpenUntilMs - now);
+            } else if (cbOpenRemainingMs >= 0) {
+                cbOpenRemainingMs = Math.max(0L, cbOpenRemainingMs - (long) Math.round(deltaSec * 1000.0));
+            }
+        } else {
+            cbOpenRemainingMs = -1L;
+        }
+    }
+
+    private long sampleGaussianMs(long mean, long stddev, long min, long max) {
+        // Box-Muller is provided by Random.nextGaussian(): mean 0, std 1
+        double sample = random.nextGaussian() * stddev + mean;
+        long ms = (long) Math.round(sample);
+        if (ms < min) ms = min;
+        if (ms > max) ms = max;
+        return ms;
     }
 
     private double wobble(double deltaSec) {
@@ -644,7 +785,19 @@ public class BallFlowApp extends Application {
         }
 
         // HUD overlay with CircuitBreaker state and failure rate
-        hudRenderer.draw(g, circuitBreaker, currentInFlight, MAX_IN_FLIGHT, failureProbability, recentOutcomes, bufferVisualSize);
+        Double openCountdownSec = null;
+        if (circuitBreaker.getState() == CircuitBreaker.State.OPEN) {
+            long rem = cbOpenRemainingMs;
+            if (rem < 0 && cbOpenUntilMs > 0) {
+                // If pausable remaining isn't initialized yet, compute from absolute deadline
+                long nowMs = System.currentTimeMillis();
+                rem = Math.max(0L, cbOpenUntilMs - nowMs);
+            }
+            if (rem >= 0) {
+                openCountdownSec = rem / 1000.0;
+            }
+        }
+        hudRenderer.draw(g, circuitBreaker, currentInFlight, MAX_IN_FLIGHT, failureProbability, recentOutcomes, bufferVisualSize, openCountdownSec, cbEvents, simElapsedMs);
 
         // Draw counters near boxes
         drawBoxCounters(g, leftBoxX, leftBoxY, rightBoxX, rightBoxY);
@@ -783,11 +936,14 @@ public class BallFlowApp extends Application {
     private void drawBoxCounters(GraphicsContext g, double leftBoxX, double leftBoxY, double rightBoxX, double rightBoxY) {
         // Left box: total departed counter
         g.setFill(Color.color(1,1,1,0.9));
-        g.fillText("Departed: " + totalDepartedLeft, leftBoxX, Math.max(14, leftBoxY - 8));
+        // Avoid overlap with HUD bar above: ensure a safe minimum Y for top labels
+        double safeTopLabelY = 140; // HUD bar ends around y≈120; keep some margin
+        double departedY = Math.max(safeTopLabelY, leftBoxY - 8);
+        g.fillText("Departed: " + totalDepartedLeft, leftBoxX, departedY);
 
         // Right box: cumulative totals (success/failure) placed in the grid
         double rx = rightBoxX;
-        double ry = Math.max(14, rightBoxY - 8);
+        double ry = Math.max(safeTopLabelY, rightBoxY - 8);
         g.fillText(String.format("Right box total — Success: %d  Failure: %d", totalRightSuccess, totalRightFailure), rx, ry);
 
         // Left box bottom: totals of returned squares that crossed the CB on the way back
