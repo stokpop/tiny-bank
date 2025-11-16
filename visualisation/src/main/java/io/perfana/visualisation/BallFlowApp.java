@@ -411,7 +411,7 @@ public class BallFlowApp extends Application {
                 // When entering HALF_OPEN, the Resilience4j metrics window effectively restarts
                 // for trial calls. Clear the visual failure buffer to make this explicit.
                 recentOutcomes.clear();
-                pushCbEvent("STATE " + tr + " — buffer cleared for trial window");
+                pushCbEvent("STATE " + tr + " — buffer cleared");
                 // Start a short visual flash so the reset is clearly visible
                 bufferClearedFlashUntilMs = simElapsedMs + 3000; // 3 seconds from now in simulation time
             } else {
@@ -429,11 +429,11 @@ public class BallFlowApp extends Application {
         });
         pub.onError(ev -> {
             lastCbReason = "error";
-            pushCbEvent("ERROR duration=" + ev.getElapsedDuration().toMillis() + "ms");
+            pushCbEvent("ERROR   " + ev.getElapsedDuration().toMillis() + "ms");
         });
         pub.onSuccess(ev -> {
             lastCbReason = "success";
-            pushCbEvent("SUCCESS duration=" + ev.getElapsedDuration().toMillis() + "ms");
+            pushCbEvent("SUCCESS " + ev.getElapsedDuration().toMillis() + "ms");
         });
         pub.onCallNotPermitted(ev -> {
             lastCbReason = "not permitted";
