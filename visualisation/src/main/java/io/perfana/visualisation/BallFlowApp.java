@@ -69,8 +69,6 @@ public class BallFlowApp extends Application {
 
     // Position of the Circuit Breaker icon inside the top pipe (fraction from left edge of pipe)
     private static final double CB_POS_FRACTION = 0.35; // 35% into the pipe
-    // Simulated connection pool capacity: max concurrent in-flight calls (after CB permitted)
-    private static final int MAX_IN_FLIGHT = 6;
 
     private final Random random = new Random();
 
@@ -119,8 +117,7 @@ public class BallFlowApp extends Application {
     private float failureRateThreshold = 50.0f;
     private int bufferVisualSize = 5; // visualize last N outcomes (align with sliding window)
 
-    // In-flight pool tracking: increment on permit, decrement only when the returning square crosses the CB on the way back
-    private int currentInFlight = 0;
+    // Connection pool removed: no in-flight tracking here anymore
 
     private final Deque<Outcome> recentOutcomes = new ArrayDeque<>();
 
@@ -331,7 +328,6 @@ public class BallFlowApp extends Application {
         recentOutcomes.clear();
         frameHistory.clear();
 
-        currentInFlight = 0;
         shortCircuitedCount = 0L;
         totalDepartedLeft = 0L;
         totalRightSuccess = 0L;
@@ -495,35 +491,29 @@ public class BallFlowApp extends Application {
             double newY = clampToPipe(b.y + wobble(deltaSec), pipeTopY, pipeHeight, BALL_RADIUS);
             Ball moved = new Ball(newX, newY, b.color, b.speed, b.startMs, b.cbChecked, b.shortCircuited);
 
-            // At CB position, if not yet checked, decide permission with connection pool gating
+            // At CB position, if not yet checked, decide permission via CircuitBreaker only (no connection pool)
             if (!b.cbChecked && newX >= cbX) {
-                if (currentInFlight >= MAX_IN_FLIGHT) {
-                    // No capacity: hold at CB icon; try again next frame
+                boolean breakerOpen = circuitBreaker.getState() == CircuitBreaker.State.OPEN;
+                // If OPEN, only allow an attempt according to rate limiter; otherwise hold at CB edge
+                if (breakerOpen && (now - lastCbAttemptMs) < cbAttemptSpacingMs) {
                     moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startMs, false, false);
                 } else {
-                    boolean breakerOpen = circuitBreaker.getState() == CircuitBreaker.State.OPEN;
-                    // If OPEN, only allow an attempt according to rate limiter; otherwise hold at CB edge
-                    if (breakerOpen && (now - lastCbAttemptMs) < cbAttemptSpacingMs) {
-                        moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startMs, false, false);
-                    } else {
-                        if (breakerOpen) {
-                            lastCbAttemptMs = now;
-                        }
-                        try {
-                            circuitBreaker.acquirePermission();
-                            // permitted: consume a pool slot and continue as ball
-                            currentInFlight++;
-                            moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startMs, true, false);
-                        } catch (CallNotPermittedException e) {
-                            // denied: start a short transition INSIDE the CB column from top pipe center to bottom pipe center
-                            shortCircuitedCount++;
-                            double topCenterY = pipeTopY + pipeHeight / 2.0;
-                            double bottomCenterY = pipeBottomY + pipeHeight / 2.0;
-                            long durationMs = 250L; // smooth morph duration
-                            shortCircuitTransitions.add(new ShortCircuitTransition(cbX, topCenterY, bottomCenterY, moved.speed, now, durationMs, topCenterY));
-                            toRemoveFromPipe.add(b);
-                            continue; // don't keep the ball in top pipe
-                        }
+                    if (breakerOpen) {
+                        lastCbAttemptMs = now;
+                    }
+                    try {
+                        circuitBreaker.acquirePermission();
+                        // permitted: continue as ball
+                        moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startMs, true, false);
+                    } catch (CallNotPermittedException e) {
+                        // denied: start a short transition INSIDE the CB column from top pipe center to bottom pipe center
+                        shortCircuitedCount++;
+                        double topCenterY = pipeTopY + pipeHeight / 2.0;
+                        double bottomCenterY = pipeBottomY + pipeHeight / 2.0;
+                        long durationMs = 250L; // smooth morph duration
+                        shortCircuitTransitions.add(new ShortCircuitTransition(cbX, topCenterY, bottomCenterY, moved.speed, now, durationMs, topCenterY));
+                        toRemoveFromPipe.add(b);
+                        continue; // don't keep the ball in top pipe
                     }
                 }
             }
@@ -563,7 +553,8 @@ public class BallFlowApp extends Application {
                 double startX = Math.min(b.x, rightBoxX + BOX_WIDTH - BALL_RADIUS - 6); // keep inside box edge
                 double startY = Math.min(Math.max(b.y, rightBoxY + BALL_RADIUS + 6), rightBoxY + BOX_HEIGHT - BALL_RADIUS - 6);
                 long morphDuration = 240L;
-                rightBoxMorphs.add(new RightBoxMorph(startX, startY, targetX, targetY, b.color, squareColor, out, true, durationMs, now, morphDuration, 0.0));
+                // No connection pool: occupiesSlot=false
+                rightBoxMorphs.add(new RightBoxMorph(startX, startY, targetX, targetY, b.color, squareColor, out, false, durationMs, now, morphDuration, 0.0));
             }
         }
 
@@ -654,7 +645,6 @@ public class BallFlowApp extends Application {
             // Count crossing when moving left past CB column; include equality to handle injected short-circuits at cbX
             boolean crossedCb = s.x >= cbX && newX < cbX;
             Outcome outcomeForBuffer = s.outcome;
-            boolean occupies = s.occupiesSlot;
             if (crossedCb) {
                 if (outcomeForBuffer != null) {
                     addOutcome(outcomeForBuffer);
@@ -664,11 +654,6 @@ public class BallFlowApp extends Application {
                     else if (outcomeForBuffer == Outcome.NOT_PERMITTED) totalReturnedNotPermitted++;
                     // clear outcome after accounting, so it won't be counted again
                     outcomeForBuffer = null;
-                }
-                // Reduce in-flight only when the returning square reaches back to the CB
-                if (occupies) {
-                    currentInFlight = Math.max(0, currentInFlight - 1);
-                    occupies = false; // prevent double-decrement
                 }
                 // Register the outcome into the CB only now (when crossing CB on return)
                 if (s.callDurationMs != null) {
@@ -682,7 +667,8 @@ public class BallFlowApp extends Application {
 
             // Clear duration once we have reported to CB to avoid duplicate reporting
             Long nextDuration = crossedCb ? null : s.callDurationMs;
-            Square moved = new Square(newX, newY, s.color, s.speed, outcomeForBuffer, occupies, nextDuration);
+            // No connection pool tracking: always occupiesSlot=false on movement
+            Square moved = new Square(newX, newY, s.color, s.speed, outcomeForBuffer, false, nextDuration);
             inPipeR2L.set(i, moved);
 
             // Stop a bit earlier before entering the left box: at the start of the bottom pipe plus small margin
@@ -790,6 +776,8 @@ public class BallFlowApp extends Application {
         // Draw Circuit Breaker icon spanning both pipes
         drawCircuitBreakerIcon(g, pipeTopX, pipeTopY, pipeBottomY, pipeLength, pipeHeight);
 
+        // Connection pool visuals removed: no waiting-queue rendering at CB
+
         // Draw transitions inside the CB column (orange squares moving vertically)
         for (ShortCircuitTransition t : shortCircuitTransitions) {
             drawSquare(g, t.x, t.currentY, SHORT_CIRCUIT_COLOR);
@@ -811,8 +799,6 @@ public class BallFlowApp extends Application {
         hudRenderer.draw(
                 g,
                 circuitBreaker,
-                currentInFlight,
-                MAX_IN_FLIGHT,
                 failureProbability,
                 recentOutcomes,
                 bufferVisualSize,
@@ -975,34 +961,7 @@ public class BallFlowApp extends Application {
                 totalReturnedSuccess, totalReturnedFailure, totalReturnedNotPermitted), lbx, lby);
     }
 
-    private void drawHud(GraphicsContext g) {
-        double x = 20, y = 18;
-        g.setFill(Color.color(1,1,1,0.9));
-        g.fillText("CircuitBreaker: " + circuitBreaker.getState(), x, y);
-
-        var metrics = circuitBreaker.getMetrics();
-        float failureRate = metrics.getFailureRate();
-        float buffered = metrics.getNumberOfBufferedCalls();
-        float notPermitted = metrics.getNumberOfNotPermittedCalls();
-        float slowCallRate = metrics.getSlowCallRate();
-
-        g.fillText(String.format("Failure rate: %.1f%% (threshold %.0f%%)", failureRate, failureRateThreshold), x, y + 16);
-        g.fillText(String.format("Buffered calls: %.0f  Not permitted: %.0f  Slow rate: %.1f%%", buffered, notPermitted, slowCallRate), x, y + 32);
-        g.fillText(String.format("In-flight (pool): %d / %d", currentInFlight, MAX_IN_FLIGHT), x, y + 48);
-        g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 64);
-
-        // Bar showing failure rate vs threshold
-        double barX = x;
-        double barY = y + 76;
-        double barW = 220;
-        double barH = 10;
-        g.setFill(Color.color(1,1,1,0.15));
-        g.fillRect(barX, barY, barW, barH);
-        double frac = clamp(0, 1, failureRate / 100.0);
-        Color barColor = failureRate >= failureRateThreshold ? Color.web("#ef4444") : Color.web("#22c55e");
-        g.setFill(barColor);
-        g.fillRect(barX, barY, barW * frac, barH);
-    }
+    // Legacy HUD removed; HudRenderer handles HUD drawing
 
     private static double clamp(double min, double max, double v) {
         return Math.max(min, Math.min(max, v));

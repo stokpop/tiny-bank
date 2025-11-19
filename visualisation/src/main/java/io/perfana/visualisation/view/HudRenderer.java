@@ -16,8 +16,6 @@ public class HudRenderer {
 
     public void draw(GraphicsContext g,
                      CircuitBreaker circuitBreaker,
-                     int currentInFlight,
-                     int maxInFlight,
                      double failureProbability,
                      Deque<Outcome> recentOutcomes,
                      int bufferVisualSize,
@@ -25,7 +23,7 @@ public class HudRenderer {
                      Deque<String> cbEvents,
                      long simElapsedMs,
                      long bufferClearedFlashUntilMs) {
-        drawHud(g, circuitBreaker, currentInFlight, maxInFlight, failureProbability, recentOutcomes, openCountdownSec);
+        drawHud(g, circuitBreaker, failureProbability, recentOutcomes, openCountdownSec);
         boolean flashActive = bufferClearedFlashUntilMs >= 0 && simElapsedMs <= bufferClearedFlashUntilMs;
         drawBufferPanel(g, recentOutcomes, bufferVisualSize, flashActive);
         drawEventPanel(g, cbEvents);
@@ -34,8 +32,6 @@ public class HudRenderer {
 
     private void drawHud(GraphicsContext g,
                          CircuitBreaker circuitBreaker,
-                         int currentInFlight,
-                         int maxInFlight,
                          double failureProbability,
                          Deque<Outcome> recentOutcomes,
                          Double openCountdownSec) {
@@ -62,15 +58,14 @@ public class HudRenderer {
 
         g.fillText(String.format("Failure rate (buffer): %.1f%% (threshold %.0f%%)", failureRateBuf, failureRateThreshold), x, y + 16);
         g.fillText(String.format("Buffered calls: %.0f  Not permitted: %.0f  Slow rate: %.1f%%", buffered, notPermitted, slowCallRate), x, y + 32);
-        g.fillText(String.format("In-flight (pool): %d / %d", currentInFlight, maxInFlight), x, y + 48);
-        g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 64);
+        g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 48);
         if (circuitBreaker.getState() == CircuitBreaker.State.OPEN && openCountdownSec != null) {
-            g.fillText(String.format("Open wait remaining: %.1fs", Math.max(0.0, openCountdownSec)), x, y + 80);
+            g.fillText(String.format("Open wait remaining: %.1fs", Math.max(0.0, openCountdownSec)), x, y + 64);
         }
 
         // Bar showing failure rate vs threshold
         double barX = x;
-        double barY = y + 92;
+        double barY = y + 76;
         double barW = 220;
         double barH = 10;
         g.setFill(Color.color(1,1,1,0.15));
