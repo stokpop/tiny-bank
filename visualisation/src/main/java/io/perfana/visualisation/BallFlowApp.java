@@ -681,7 +681,7 @@ public class BallFlowApp extends Application {
         }
         if (!arrivedBottom.isEmpty()) {
             inPipeR2L.removeAll(arrivedBottom);
-            leftSquares.addAll(arrivedBottom.stream().map(s -> new Square(0, 0, s.color, 0, null, false, null, false)).toList());
+            leftSquares.addAll(arrivedBottom.stream().map(s -> new Square(0, 0, s.color, 0, null, false, null, s.halfOpenTrial)).toList());
         }
 
         // Note: R2L spawn uses a fixed interval; only incoming (L2R) arrivals are Gaussian per requirement.
@@ -765,13 +765,13 @@ public class BallFlowApp extends Application {
 
         // Draw moving shapes in pipes
         for (Ball b : inPipeL2R) {
-            drawBall(g, b.x, b.y, b.color);
+            drawBallWithGlow(g, b.x, b.y, b.color, b.halfOpenTrial);
         }
         for (Square s : inPipeL2RShort) {
             drawSquare(g, s.x, s.y, s.color);
         }
         for (Square s : inPipeR2L) {
-            drawSquare(g, s.x, s.y, s.color);
+            drawSquareWithGlow(g, s.x, s.y, s.color, s.halfOpenTrial);
         }
 
         // Draw Circuit Breaker icon spanning both pipes
@@ -880,7 +880,7 @@ public class BallFlowApp extends Application {
 
             double x = boxX + BALL_RADIUS + 6 + col * (BALL_RADIUS * 2 + 4);
             double y = boxY + BALL_RADIUS + 6 + row * (BALL_RADIUS * 2 + 4);
-            drawSquare(g, x, y, s.color);
+            drawSquareWithGlow(g, x, y, s.color, s.halfOpenTrial);
 
             squareIndex++;
         }
@@ -934,11 +934,11 @@ public class BallFlowApp extends Application {
 
             // Draw ball outline with fading alpha
             g.setGlobalAlpha(ballAlpha);
-            drawBall(g, x, y, m.ballColor);
+            drawBallWithGlow(g, x, y, m.ballColor, m.halfOpenTrial);
 
             // Draw filling square with increasing alpha and slight corner rounding for a softer morph
             g.setGlobalAlpha(squareAlpha);
-            drawSquare(g, x, y, m.squareColor);
+            drawSquareWithGlow(g, x, y, m.squareColor, m.halfOpenTrial);
 
             // Reset alpha
             g.setGlobalAlpha(1.0);
@@ -951,6 +951,40 @@ public class BallFlowApp extends Application {
 
     private void drawSquare(GraphicsContext g, double x, double y, Color color) {
         shapeRenderer.drawSquare(g, x, y, color);
+    }
+
+    // Helpers: draw with optional yellow glow for HALF_OPEN probe calls
+    private void drawBallWithGlow(GraphicsContext g, double x, double y, Color color, boolean glow) {
+        if (glow) {
+            // soft yellow glow behind the ball outline
+            Color glowColor = Color.web("#facc15");
+            double r = BALL_RADIUS;
+            double[] scales = new double[]{2.1, 1.6};
+            double[] alphas = new double[]{0.20, 0.12};
+            for (int i = 0; i < scales.length; i++) {
+                double s = scales[i];
+                double a = alphas[i];
+                g.setFill(new Color(glowColor.getRed(), glowColor.getGreen(), glowColor.getBlue(), a));
+                g.fillOval(x - r * s, y - r * s, r * 2 * s, r * 2 * s);
+            }
+        }
+        drawBall(g, x, y, color);
+    }
+
+    private void drawSquareWithGlow(GraphicsContext g, double x, double y, Color color, boolean glow) {
+        if (glow) {
+            Color glowColor = Color.web("#facc15");
+            double s = SQUARE_SIZE;
+            double[] pads = new double[]{8.0, 4.0};
+            double[] alphas = new double[]{0.18, 0.10};
+            for (int i = 0; i < pads.length; i++) {
+                double pad = pads[i];
+                double a = alphas[i];
+                g.setFill(new Color(glowColor.getRed(), glowColor.getGreen(), glowColor.getBlue(), a));
+                g.fillRoundRect(x - s / 2.0 - pad, y - s / 2.0 - pad, s + pad * 2, s + pad * 2, 6, 6);
+            }
+        }
+        drawSquare(g, x, y, color);
     }
 
     private void drawBoxCounters(GraphicsContext g, double leftBoxX, double leftBoxY, double rightBoxX, double rightBoxY) {
