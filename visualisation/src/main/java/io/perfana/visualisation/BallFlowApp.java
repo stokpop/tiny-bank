@@ -440,9 +440,6 @@ public class BallFlowApp extends Application {
             lastCbReason = "failure rate " + String.format("%.1f%%", ev.getFailureRate());
             pushCbEvent("FAILURE_RATE_EXCEEDED " + String.format("%.1f%%", ev.getFailureRate()));
         });
-        pub.onSlowCallRateExceeded(ev -> {
-            pushCbEvent("SLOW_RATE_EXCEEDED " + String.format("%.1f%%", ev.getSlowCallRate()));
-        });
         pub.onReset(ev -> pushCbEvent("RESET"));
     }
 

@@ -42,7 +42,6 @@ public class HudRenderer {
         var metrics = circuitBreaker.getMetrics();
         float buffered = metrics.getNumberOfBufferedCalls();
         float notPermitted = metrics.getNumberOfNotPermittedCalls();
-        float slowCallRate = metrics.getSlowCallRate();
 
         // Read actual config so visuals match the breaker behaviour precisely
         float failureRateThreshold = circuitBreaker.getCircuitBreakerConfig().getFailureRateThreshold();
@@ -57,7 +56,7 @@ public class HudRenderer {
         double failureRateBuf = total > 0 ? (failures * 100.0) / total : 0.0;
 
         g.fillText(String.format("Failure rate (buffer): %.1f%% (threshold %.0f%%)", failureRateBuf, failureRateThreshold), x, y + 16);
-        g.fillText(String.format("Buffered calls: %.0f  Not permitted: %.0f  Slow rate: %.1f%%", buffered, notPermitted, slowCallRate), x, y + 32);
+        g.fillText(String.format("Buffered calls: %.0f  Not permitted: %.0f", buffered, notPermitted), x, y + 32);
         g.fillText(String.format("Failure probability (sim): %.0f%%", failureProbability * 100.0), x, y + 48);
         if (circuitBreaker.getState() == CircuitBreaker.State.OPEN && openCountdownSec != null) {
             g.fillText(String.format("Open wait remaining: %.1fs", Math.max(0.0, openCountdownSec)), x, y + 64);
@@ -98,7 +97,7 @@ public class HudRenderer {
 
     private void drawBufferPanel(GraphicsContext g, Deque<Outcome> recentOutcomes, int bufferVisualSize, boolean flashActive) {
         // Panel near HUD (top-left)
-        double x = 260, y = 10; // move a bit up so squares don't touch the slow rate text
+        double x = 260, y = 10;
         g.setFill(Color.color(1,1,1,0.9));
         g.fillText("Buffer (latest " + bufferVisualSize + ")", x, y);
         if (flashActive) {

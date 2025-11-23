@@ -193,10 +193,10 @@ PT70S|run-command(annotate-phase4)|name=alerts;text=Phase 4: Failure rate 1 proc
 PT90S|run-command(wiremock-failure-50)|name=wiremock-failures;failure_rate=50
 PT90S|run-command(annotate-phase5)|name=alerts;text=Phase 5: Failure rate 50 procent
 
-PT110S|run-command(wiremock-failure-50)|name=wiremock-failures;failure_rate=100
+PT110S|run-command(wiremock-failure-100)|name=wiremock-failures;failure_rate=100
 PT110S|run-command(annotate-phase6)|name=alerts;text=Phase 6: Failure rate 100 procent
 
-PT130S|run-command(wiremock-failure-50)|name=wiremock-failures;failure_rate=10
+PT130S|run-command(wiremock-failure-10)|name=wiremock-failures;failure_rate=10
 PT130S|run-command(annotate-phase7)|name=alerts;text=Phase 7: Failure rate 10 procent
                         """;
 
