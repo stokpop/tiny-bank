@@ -578,9 +578,12 @@ public class BallFlowApp extends Application {
         }
         if (!arrivedShort.isEmpty()) {
             inPipeL2RShort.removeAll(arrivedShort);
-            // deposit orange squares into right box
+            // Immediately send NOT_PERMITTED replies back into the bottom pipe (no delay queue)
             for (Square s : arrivedShort) {
-                rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0, Outcome.NOT_PERMITTED, false, null, false));
+                double pipeEntryX = rightBoxX - (SQUARE_SIZE / 2.0) - 6;
+                double pipeEntryY = pipeBottomY + pipeHeight / 2.0; // center of bottom pipe
+                double speed = 80 + random.nextDouble() * 120;
+                inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, SHORT_CIRCUIT_COLOR, speed, Outcome.NOT_PERMITTED, false, null, false));
             }
         }
 
@@ -606,7 +609,7 @@ public class BallFlowApp extends Application {
             }
         }
 
-        // Advance right-box morphs and finalize into rightSquares when completed
+        // Advance right-box morphs and immediately send replies back when completed (no delay queue)
         if (!rightBoxMorphs.isEmpty()) {
             List<RightBoxMorph> done = new ArrayList<>();
             for (int i = 0; i < rightBoxMorphs.size(); i++) {
@@ -620,24 +623,17 @@ public class BallFlowApp extends Application {
             }
             if (!done.isEmpty()) {
                 for (RightBoxMorph m : done) {
-                    rightSquares.add(new Square(0, 0, m.squareColor, 0, m.outcome, m.occupiesSlot, m.callDurationMs, m.halfOpenTrial));
-                    // Count totals for right box when the morph completes (square is placed)
+                    // Immediately inject into bottom pipe at the mouth position
+                    double pipeEntryX = rightBoxX - (SQUARE_SIZE / 2.0) - 6;
+                    double pipeEntryY = pipeBottomY + pipeHeight / 2.0;
+                    double speed = 80 + random.nextDouble() * 120;
+                    inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, m.squareColor, speed, m.outcome, m.occupiesSlot, m.callDurationMs, m.halfOpenTrial));
+                    // Count totals for right box when the morph completes (virtual placement)
                     if (m.outcome == Outcome.SUCCESS) totalRightSuccess++;
                     else if (m.outcome == Outcome.FAILURE) totalRightFailure++;
                 }
                 rightBoxMorphs.removeAll(done);
             }
-        }
-
-        // Spawn one square from right box into the BOTTOM pipe at intervals (right -> left)
-        if (now - lastSpawnR2LNs >= spawnIntervalR2LNs && !rightSquares.isEmpty()) {
-            Square nextSq = rightSquares.pollFirst();
-            if (nextSq != null) {
-                double pipeEntryX = rightBoxX - (SQUARE_SIZE / 2.0) - 6; // start more to the right inside the pipe
-                double pipeEntryY = pipeBottomY + pipeHeight / 2.0; // exact center of bottom pipe
-                inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, nextSq.color, 80 + random.nextDouble() * 120, nextSq.outcome, nextSq.occupiesSlot, nextSq.callDurationMs, nextSq.halfOpenTrial));
-            }
-            lastSpawnR2LNs = now;
         }
 
         // Move squares in the bottom pipe to the left; on arrival put into left box (as squares)
@@ -763,8 +759,7 @@ public class BallFlowApp extends Application {
 
         // Draw contents in boxes
         drawMixedInBox(g, leftBoxX, leftBoxY, leftBalls, leftSquares);
-        // Draw waiting replies (squares) queued at the mouth of the LOWER pipe, not at the bottom grid
-        drawSquaresInBox(g, rightBoxX, rightBoxY, rightSquares, pipeBottomY, pipeHeight);
+        // No delay queue in the right box: replies are sent back immediately
         // Draw right-box morphs on top for visibility
         drawRightBoxMorphs(g, rightBoxX, rightBoxY);
 
