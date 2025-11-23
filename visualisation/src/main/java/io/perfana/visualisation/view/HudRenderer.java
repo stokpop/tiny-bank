@@ -19,13 +19,18 @@ public class HudRenderer {
                      double failureProbability,
                      Deque<Outcome> recentOutcomes,
                      int bufferVisualSize,
+                     Deque<Outcome> halfOpenOutcomes,
+                     int halfOpenMax,
                      Double openCountdownSec,
                      Deque<String> cbEvents,
                      long simElapsedMs,
-                     long bufferClearedFlashUntilMs) {
+                     long bufferClearedFlashUntilMs,
+                     long halfOpenBufferClearedFlashUntilMs) {
         drawHud(g, circuitBreaker, failureProbability, recentOutcomes, openCountdownSec);
-        boolean flashActive = bufferClearedFlashUntilMs >= 0 && simElapsedMs <= bufferClearedFlashUntilMs;
-        drawBufferPanel(g, recentOutcomes, bufferVisualSize, flashActive);
+        boolean flashActiveClosed = bufferClearedFlashUntilMs >= 0 && simElapsedMs <= bufferClearedFlashUntilMs;
+        boolean flashActiveHalfOpen = halfOpenBufferClearedFlashUntilMs >= 0 && simElapsedMs <= halfOpenBufferClearedFlashUntilMs;
+        drawBufferPanel(g, recentOutcomes, bufferVisualSize, flashActiveClosed);
+        drawHalfOpenPanel(g, halfOpenOutcomes, halfOpenMax, flashActiveHalfOpen);
         drawEventPanel(g, cbEvents);
         drawClock(g, simElapsedMs);
     }
@@ -144,6 +149,32 @@ public class HudRenderer {
                 g.setStroke(flashActive ? Color.color(1,1,1,0.8) : Color.color(1,1,1,0.35));
                 g.strokeRect(cx, cy, cell, cell);
             }
+        }
+    }
+
+    private void drawHalfOpenPanel(GraphicsContext g, Deque<Outcome> halfOpenOutcomes, int halfOpenMax, boolean flashActive) {
+        // Place this panel below the first buffer panel
+        double x = 260, y = 56; // a bit lower than the first panel title
+        g.setFill(Color.color(1,1,1,0.9));
+        g.fillText("Half-Open trials (max " + halfOpenMax + ")", x, y);
+        if (flashActive) {
+            g.setFill(Color.web("#f59e0b"));
+            g.fillText("CLEARED", x + 200, y);
+        }
+        double cell = 10;
+        double pad = 2;
+        double startY = y + 6;
+
+        int available = halfOpenOutcomes.size();
+        int drawCount = Math.min(available, halfOpenMax);
+        for (int i = 0; i < drawCount; i++) {
+            Outcome o = halfOpenOutcomes.stream().skip(i).findFirst().orElse(null);
+            if (o == null) break;
+            Color c = (o == Outcome.SUCCESS) ? Color.web("#22c55e") : Color.web("#ef4444");
+            g.setFill(c);
+            double rx = x + i * (cell + pad);
+            double ry = startY;
+            g.fillRect(rx, ry, cell, cell);
         }
     }
 

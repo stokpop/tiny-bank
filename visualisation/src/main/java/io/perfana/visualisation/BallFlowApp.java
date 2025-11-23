@@ -101,13 +101,15 @@ public class BallFlowApp extends Application {
     private long cbOpenRemainingMs = -1L;
     // Diagnostics: count how many NOT_PERMITTED events occurred since the moment CB opened
     private long deniedSinceOpen = 0L;
-    // Visual cue window (simulation ms) to highlight buffer reset after entering HALF_OPEN
+    // Visual cue window (simulation ms) to highlight buffer reset for CLOSED buffer
     private long bufferClearedFlashUntilMs = -1L;
+    // Visual cue window (simulation ms) to highlight buffer reset for HALF_OPEN trials buffer
+    private long halfOpenBufferClearedFlashUntilMs = -1L;
 
-    private record Ball(double x, double y, Color color, double speed, long startMs, boolean cbChecked, boolean shortCircuited) {}
-    private record Square(double x, double y, Color color, double speed, Outcome outcome, boolean occupiesSlot, Long callDurationMs) {}
+    private record Ball(double x, double y, Color color, double speed, long startMs, boolean cbChecked, boolean shortCircuited, boolean halfOpenTrial) {}
+    private record Square(double x, double y, Color color, double speed, Outcome outcome, boolean occupiesSlot, Long callDurationMs, boolean halfOpenTrial) {}
     private record ShortCircuitTransition(double x, double yStart, double yEnd, double speed, long startMs, long durationMs, double currentY) {}
-    private record RightBoxMorph(double xStart, double yStart, double xEnd, double yEnd, Color ballColor, Color squareColor, Outcome outcome, boolean occupiesSlot, Long callDurationMs, long startMs, long durationMs, double progress) {}
+    private record RightBoxMorph(double xStart, double yStart, double xEnd, double yEnd, Color ballColor, Color squareColor, Outcome outcome, boolean occupiesSlot, Long callDurationMs, boolean halfOpenTrial, long startMs, long durationMs, double progress) {}
 
     // CircuitBreaker model
     private CircuitBreaker circuitBreaker;
@@ -119,7 +121,10 @@ public class BallFlowApp extends Application {
 
     // Connection pool removed: no in-flight tracking here anymore
 
+    // Buffer for outcomes in CLOSED state (regular sliding window visualisation)
     private final Deque<Outcome> recentOutcomes = new ArrayDeque<>();
+    // Separate buffer for outcomes that were permitted in HALF_OPEN state (trial calls)
+    private final Deque<Outcome> halfOpenOutcomes = new ArrayDeque<>();
 
     // Left box contents: balls (original) and squares (returned)
     private final Deque<Ball> leftBalls = new ArrayDeque<>();
@@ -217,7 +222,7 @@ public class BallFlowApp extends Application {
                 .slidingWindowSize(5)
                 .minimumNumberOfCalls(4)
                 .waitDurationInOpenState(Duration.ofSeconds(6))
-                .permittedNumberOfCallsInHalfOpenState(5)
+                .permittedNumberOfCallsInHalfOpenState(3)
                 .automaticTransitionFromOpenToHalfOpenEnabled(true)
                 .build();
         CircuitBreakerRegistry registry = CircuitBreakerRegistry.of(cbConfig);
@@ -354,7 +359,7 @@ public class BallFlowApp extends Application {
                 .slidingWindowSize(5)
                 .minimumNumberOfCalls(4)
                 .waitDurationInOpenState(Duration.ofSeconds(6))
-                .permittedNumberOfCallsInHalfOpenState(5)
+                .permittedNumberOfCallsInHalfOpenState(3)
                 .automaticTransitionFromOpenToHalfOpenEnabled(true)
                 .build();
         CircuitBreakerRegistry registry = CircuitBreakerRegistry.of(cbConfig);
@@ -404,12 +409,11 @@ public class BallFlowApp extends Application {
                 lastCbReason = lastCbReason != null ? lastCbReason : "threshold reached";
                 pushCbEvent("STATE " + tr + " — wait " + (cbOpenWaitMs/1000.0) + "s");
             } else if (tr.endsWith("to HALF_OPEN")) {
-                // When entering HALF_OPEN, the Resilience4j metrics window effectively restarts
-                // for trial calls. Clear the visual failure buffer to make this explicit.
-                recentOutcomes.clear();
-                pushCbEvent("STATE " + tr + " — buffer cleared");
-                // Start a short visual flash so the reset is clearly visible
-                bufferClearedFlashUntilMs = simElapsedMs + 3000; // 3 seconds from now in simulation time
+                // When entering HALF_OPEN, start a fresh trial buffer; keep CLOSED buffer intact
+                halfOpenOutcomes.clear();
+                pushCbEvent("STATE " + tr + " — trials buffer cleared");
+                // Start a short visual flash for the trials buffer
+                halfOpenBufferClearedFlashUntilMs = simElapsedMs + 3000; // 3 seconds visual flash
             } else {
                 // any other transition
                 pushCbEvent("STATE " + tr);
@@ -418,6 +422,10 @@ public class BallFlowApp extends Application {
                     cbOpenUntilMs = -1L;
                     cbOpenRemainingMs = -1L;
                     deniedSinceOpen = 0L; // clear when leaving OPEN as well
+                }
+                // On transition away from HALF_OPEN, clear the trials buffer to be ready for next cycle
+                if (tr.startsWith("HALF_OPEN to")) {
+                    halfOpenOutcomes.clear();
                 }
             }
             // clear last reason after we used it
@@ -468,7 +476,7 @@ public class BallFlowApp extends Application {
             if (next != null) {
                 double pipeEntryX = leftBoxX + BOX_WIDTH + (PIPE_WIDTH / 2.0);
                 double pipeEntryY = pipeTopY + pipeHeight / 2.0; // exact center of top pipe
-                inPipeL2R.add(new Ball(pipeEntryX, pipeEntryY, next.color, 80 + random.nextDouble() * 120, now, false, false));
+                inPipeL2R.add(new Ball(pipeEntryX, pipeEntryY, next.color, 80 + random.nextDouble() * 120, now, false, false, false));
                 // Count ball departure from the left box
                 totalDepartedLeft++;
             }
@@ -486,14 +494,14 @@ public class BallFlowApp extends Application {
             Ball b = inPipeL2R.get(i);
             double newX = b.x + b.speed * deltaSec;
             double newY = clampToPipe(b.y + wobble(deltaSec), pipeTopY, pipeHeight, BALL_RADIUS);
-            Ball moved = new Ball(newX, newY, b.color, b.speed, b.startMs, b.cbChecked, b.shortCircuited);
+            Ball moved = new Ball(newX, newY, b.color, b.speed, b.startMs, b.cbChecked, b.shortCircuited, b.halfOpenTrial);
 
             // At CB position, if not yet checked, decide permission via CircuitBreaker only (no connection pool)
             if (!b.cbChecked && newX >= cbX) {
                 boolean breakerOpen = circuitBreaker.getState() == CircuitBreaker.State.OPEN;
                 // If OPEN, only allow an attempt according to rate limiter; otherwise hold at CB edge
                 if (breakerOpen && (now - lastCbAttemptMs) < cbAttemptSpacingMs) {
-                    moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startMs, false, false);
+                    moved = new Ball(cbX, moved.y, moved.color, moved.speed, moved.startMs, false, false, moved.halfOpenTrial);
                 } else {
                     if (breakerOpen) {
                         lastCbAttemptMs = now;
@@ -501,7 +509,8 @@ public class BallFlowApp extends Application {
                     try {
                         circuitBreaker.acquirePermission();
                         // permitted: continue as ball
-                        moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startMs, true, false);
+                        boolean isHalfOpen = circuitBreaker.getState() == CircuitBreaker.State.HALF_OPEN;
+                        moved = new Ball(newX, moved.y, moved.color, moved.speed, moved.startMs, true, false, isHalfOpen);
                     } catch (CallNotPermittedException e) {
                         // denied: start a short transition INSIDE the CB column from top pipe center to bottom pipe center
                         shortCircuitedCount++;
@@ -551,7 +560,7 @@ public class BallFlowApp extends Application {
                 double startY = Math.min(Math.max(b.y, rightBoxY + BALL_RADIUS + 6), rightBoxY + BOX_HEIGHT - BALL_RADIUS - 6);
                 long morphDuration = 240L;
                 // No connection pool: occupiesSlot=false
-                rightBoxMorphs.add(new RightBoxMorph(startX, startY, targetX, targetY, b.color, squareColor, out, false, durationMs, now, morphDuration, 0.0));
+                rightBoxMorphs.add(new RightBoxMorph(startX, startY, targetX, targetY, b.color, squareColor, out, false, durationMs, b.halfOpenTrial, now, morphDuration, 0.0));
             }
         }
 
@@ -561,7 +570,7 @@ public class BallFlowApp extends Application {
             Square s = inPipeL2RShort.get(i);
             double newX = s.x + s.speed * deltaSec;
             double newY = clampToPipe(s.y + wobble(deltaSec), pipeTopY, pipeHeight, SQUARE_SIZE / 2.0);
-            Square moved = new Square(newX, newY, s.color, s.speed, s.outcome, s.occupiesSlot, null);
+            Square moved = new Square(newX, newY, s.color, s.speed, s.outcome, s.occupiesSlot, null, false);
             inPipeL2RShort.set(i, moved);
             if (newX >= rightBoxX + BOX_WIDTH / 2.0 - BALL_RADIUS) {
                 arrivedShort.add(moved);
@@ -571,7 +580,7 @@ public class BallFlowApp extends Application {
             inPipeL2RShort.removeAll(arrivedShort);
             // deposit orange squares into right box
             for (Square s : arrivedShort) {
-                rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0, Outcome.NOT_PERMITTED, false, null));
+                rightSquares.add(new Square(0, 0, SHORT_CIRCUIT_COLOR, 0, Outcome.NOT_PERMITTED, false, null, false));
             }
         }
 
@@ -591,7 +600,7 @@ public class BallFlowApp extends Application {
             if (!finished.isEmpty()) {
                 for (ShortCircuitTransition t : finished) {
                     // inject orange square into bottom pipe at CB X and bottom center Y, preserving speed
-                    inPipeR2L.add(new Square(t.x, t.yEnd, SHORT_CIRCUIT_COLOR, t.speed, Outcome.NOT_PERMITTED, false, null));
+                    inPipeR2L.add(new Square(t.x, t.yEnd, SHORT_CIRCUIT_COLOR, t.speed, Outcome.NOT_PERMITTED, false, null, false));
                 }
                 shortCircuitTransitions.removeAll(finished);
             }
@@ -604,14 +613,14 @@ public class BallFlowApp extends Application {
                 RightBoxMorph m = rightBoxMorphs.get(i);
                 double elapsed = now - m.startMs;
                 double p = clamp(0.0, 1.0, elapsed / (double) m.durationMs);
-                rightBoxMorphs.set(i, new RightBoxMorph(m.xStart, m.yStart, m.xEnd, m.yEnd, m.ballColor, m.squareColor, m.outcome, m.occupiesSlot, m.callDurationMs, m.startMs, m.durationMs, p));
+                rightBoxMorphs.set(i, new RightBoxMorph(m.xStart, m.yStart, m.xEnd, m.yEnd, m.ballColor, m.squareColor, m.outcome, m.occupiesSlot, m.callDurationMs, m.halfOpenTrial, m.startMs, m.durationMs, p));
                 if (p >= 1.0) {
                     done.add(rightBoxMorphs.get(i));
                 }
             }
             if (!done.isEmpty()) {
                 for (RightBoxMorph m : done) {
-                    rightSquares.add(new Square(0, 0, m.squareColor, 0, m.outcome, m.occupiesSlot, m.callDurationMs));
+                    rightSquares.add(new Square(0, 0, m.squareColor, 0, m.outcome, m.occupiesSlot, m.callDurationMs, m.halfOpenTrial));
                     // Count totals for right box when the morph completes (square is placed)
                     if (m.outcome == Outcome.SUCCESS) totalRightSuccess++;
                     else if (m.outcome == Outcome.FAILURE) totalRightFailure++;
@@ -626,7 +635,7 @@ public class BallFlowApp extends Application {
             if (nextSq != null) {
                 double pipeEntryX = rightBoxX - (SQUARE_SIZE / 2.0) - 6; // start more to the right inside the pipe
                 double pipeEntryY = pipeBottomY + pipeHeight / 2.0; // exact center of bottom pipe
-                inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, nextSq.color, 80 + random.nextDouble() * 120, nextSq.outcome, nextSq.occupiesSlot, nextSq.callDurationMs));
+                inPipeR2L.add(new Square(pipeEntryX, pipeEntryY, nextSq.color, 80 + random.nextDouble() * 120, nextSq.outcome, nextSq.occupiesSlot, nextSq.callDurationMs, nextSq.halfOpenTrial));
             }
             lastSpawnR2LNs = now;
         }
@@ -644,7 +653,7 @@ public class BallFlowApp extends Application {
             Outcome outcomeForBuffer = s.outcome;
             if (crossedCb) {
                 if (outcomeForBuffer != null) {
-                    addOutcome(outcomeForBuffer);
+                    addOutcome(outcomeForBuffer, s.halfOpenTrial);
                     // Also update returned totals at the moment of crossing the CB on the way back
                     if (outcomeForBuffer == Outcome.SUCCESS) totalReturnedSuccess++;
                     else if (outcomeForBuffer == Outcome.FAILURE) totalReturnedFailure++;
@@ -665,7 +674,7 @@ public class BallFlowApp extends Application {
             // Clear duration once we have reported to CB to avoid duplicate reporting
             Long nextDuration = crossedCb ? null : s.callDurationMs;
             // No connection pool tracking: always occupiesSlot=false on movement
-            Square moved = new Square(newX, newY, s.color, s.speed, outcomeForBuffer, false, nextDuration);
+            Square moved = new Square(newX, newY, s.color, s.speed, outcomeForBuffer, false, nextDuration, s.halfOpenTrial);
             inPipeR2L.set(i, moved);
 
             // Stop a bit earlier before entering the left box: at the start of the bottom pipe plus small margin
@@ -676,7 +685,7 @@ public class BallFlowApp extends Application {
         }
         if (!arrivedBottom.isEmpty()) {
             inPipeR2L.removeAll(arrivedBottom);
-            leftSquares.addAll(arrivedBottom.stream().map(s -> new Square(0, 0, s.color, 0, null, false, null)).toList());
+            leftSquares.addAll(arrivedBottom.stream().map(s -> new Square(0, 0, s.color, 0, null, false, null, false)).toList());
         }
 
         // Note: R2L spawn uses a fixed interval; only incoming (L2R) arrivals are Gaussian per requirement.
@@ -799,10 +808,13 @@ public class BallFlowApp extends Application {
                 failureProbability,
                 recentOutcomes,
                 bufferVisualSize,
+                halfOpenOutcomes,
+                circuitBreaker.getCircuitBreakerConfig().getPermittedNumberOfCallsInHalfOpenState(),
                 openCountdownSec,
                 cbEvents,
                 simElapsedMs,
-                bufferClearedFlashUntilMs);
+                bufferClearedFlashUntilMs,
+                halfOpenBufferClearedFlashUntilMs);
 
         // Draw counters near boxes
         drawBoxCounters(g, leftBoxX, leftBoxY, rightBoxX, rightBoxY);
@@ -813,14 +825,22 @@ public class BallFlowApp extends Application {
         cbRenderer.drawColumn(g, circuitBreaker, cbX, pipeTopY, pipeBottomY, pipeHeight);
     }
 
-    private void addOutcome(Outcome outcome) {
+    private void addOutcome(Outcome outcome, boolean halfOpenTrial) {
         // Exclude NOT_PERMITTED from the visual failure buffer
         if (outcome == Outcome.NOT_PERMITTED) {
             return;
         }
-        recentOutcomes.addLast(outcome);
-        while (recentOutcomes.size() > bufferVisualSize) {
-            recentOutcomes.removeFirst();
+        if (halfOpenTrial) {
+            halfOpenOutcomes.addLast(outcome);
+            int maxTrials = circuitBreaker.getCircuitBreakerConfig().getPermittedNumberOfCallsInHalfOpenState();
+            while (halfOpenOutcomes.size() > maxTrials) {
+                halfOpenOutcomes.removeFirst();
+            }
+        } else {
+            recentOutcomes.addLast(outcome);
+            while (recentOutcomes.size() > bufferVisualSize) {
+                recentOutcomes.removeFirst();
+            }
         }
     }
 
@@ -970,7 +990,7 @@ public class BallFlowApp extends Application {
         double saturation = 0.65 + random.nextDouble() * 0.3; // [0.65, 0.95)
         double brightness = 0.80 + random.nextDouble() * 0.2; // [0.80, 1.0)
         Color color = Color.hsb(hueDeg, saturation, brightness);
-        return new Ball(0, 0, color, 0, System.currentTimeMillis(), false, false);
+        return new Ball(0, 0, color, 0, System.currentTimeMillis(), false, false, false);
     }
 
     public static void main(String[] args) {
