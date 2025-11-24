@@ -97,7 +97,8 @@ public class HudRenderer {
         String legend = "Bar = failure rate (buffer), tick = CB threshold; red when ≥ threshold and min calls reached";
         g.setFill(Color.color(1,1,1,0.75));
         // Move legend a bit further down to avoid overlapping the events text on the right
-        g.fillText(legend, barX, barY + barH + 26);
+        // Previously this sat close to the CB events list height; nudge further down.
+        g.fillText(legend, barX, barY + barH + 40);
     }
 
     private void drawBufferPanel(GraphicsContext g, Deque<Outcome> recentOutcomes, int bufferVisualSize, boolean flashActive) {
@@ -105,14 +106,10 @@ public class HudRenderer {
         double x = 260, y = 10;
         g.setFill(Color.color(1,1,1,0.9));
         g.fillText("Buffer (latest " + bufferVisualSize + ")", x, y);
-        if (flashActive) {
-            // Show a short-lived badge to make the reset clearly visible
-            g.setFill(Color.web("#f59e0b"));
-            g.fillText("CLEARED", x + 140, y); // small badge next to the title
-        }
         double cell = 10;
         double pad = 2;
         double startY = y + 6;
+        double squaresTop = startY + 6;
 
         // Optional highlight border while flashing
         if (flashActive) {
@@ -129,7 +126,7 @@ public class HudRenderer {
         for (; idx < bufferVisualSize; idx++) {
             double cx = x + idx * (cell + pad);
             // Move the squares themselves a few pixels up to increase spacing from the slow rate text
-            double cy = startY + 6;
+            double cy = squaresTop;
             if (idx < available) {
                 // Draw filled square for existing outcome
                 Outcome o = recentOutcomes.stream().skip(idx).findFirst().orElse(null);
@@ -150,6 +147,12 @@ public class HudRenderer {
                 g.strokeRect(cx, cy, cell, cell);
             }
         }
+        // Place the CLEARED badge after the buffer blocks (below the row of squares)
+        if (flashActive) {
+            g.setFill(Color.web("#f59e0b"));
+            double yCleared = squaresTop + cell + 14; // a little space below the squares
+            g.fillText("CLEARED", x, yCleared);
+        }
     }
 
     private void drawHalfOpenPanel(GraphicsContext g, Deque<Outcome> halfOpenOutcomes, int halfOpenMax, boolean flashActive) {
@@ -157,13 +160,10 @@ public class HudRenderer {
         double x = 260, y = 56; // a bit lower than the first panel title
         g.setFill(Color.color(1,1,1,0.9));
         g.fillText("Half-Open trials (max " + halfOpenMax + ")", x, y);
-        if (flashActive) {
-            g.setFill(Color.web("#f59e0b"));
-            g.fillText("CLEARED", x + 200, y);
-        }
         double cell = 10;
         double pad = 2;
         double startY = y + 6;
+        double squaresTop = startY + 6;
 
         int available = halfOpenOutcomes.size();
         int drawCount = Math.min(available, halfOpenMax);
@@ -173,8 +173,15 @@ public class HudRenderer {
             Color c = (o == Outcome.SUCCESS) ? Color.web("#22c55e") : Color.web("#ef4444");
             g.setFill(c);
             double rx = x + i * (cell + pad);
-            double ry = startY;
+            double ry = squaresTop;
             g.fillRect(rx, ry, cell, cell);
+        }
+
+        // Show the CLEARED badge below the row of squares, similar to the main buffer panel
+        if (flashActive) {
+            g.setFill(Color.web("#f59e0b"));
+            double yCleared = squaresTop + cell + 14;
+            g.fillText("CLEARED", x, yCleared);
         }
     }
 
