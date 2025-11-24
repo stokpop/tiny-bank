@@ -1,16 +1,11 @@
 package io.perfana.visualisation.view;
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.perfana.visualisation.config.LayoutConfig;
 import io.perfana.visualisation.model.Outcome;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 
 import java.util.Deque;
-import java.time.Instant;
-import java.time.LocalTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 
 public class HudRenderer {
 
@@ -29,7 +24,8 @@ public class HudRenderer {
         drawHud(g, circuitBreaker, failureProbability, recentOutcomes, openCountdownSec);
         boolean flashActiveClosed = bufferClearedFlashUntilMs >= 0 && simElapsedMs <= bufferClearedFlashUntilMs;
         boolean flashActiveHalfOpen = halfOpenBufferClearedFlashUntilMs >= 0 && simElapsedMs <= halfOpenBufferClearedFlashUntilMs;
-        drawBufferPanel(g, recentOutcomes, bufferVisualSize, flashActiveClosed);
+        int minCalls = circuitBreaker.getCircuitBreakerConfig().getMinimumNumberOfCalls();
+        drawBufferPanel(g, recentOutcomes, bufferVisualSize, minCalls, flashActiveClosed);
         drawHalfOpenPanel(g, halfOpenOutcomes, halfOpenMax, flashActiveHalfOpen);
         drawEventPanel(g, cbEvents);
         drawClock(g, simElapsedMs);
@@ -101,24 +97,17 @@ public class HudRenderer {
         g.fillText(legend, barX, barY + barH + 40);
     }
 
-    private void drawBufferPanel(GraphicsContext g, Deque<Outcome> recentOutcomes, int bufferVisualSize, boolean flashActive) {
+    private void drawBufferPanel(GraphicsContext g, Deque<Outcome> recentOutcomes, int bufferVisualSize, int minCalls, boolean flashActive) {
         // Panel near HUD (top-left)
-        double x = 260, y = 10;
+        double x = 260, y = 18; // align title baseline with "CircuitBreaker: ..." text at y=18
         g.setFill(Color.color(1,1,1,0.9));
-        g.fillText("Buffer (latest " + bufferVisualSize + ")", x, y);
+        g.fillText("Window (size " + bufferVisualSize + ", min " + minCalls + ")", x, y);
         double cell = 10;
         double pad = 2;
         double startY = y + 6;
         double squaresTop = startY + 6;
 
-        // Optional highlight border while flashing
-        if (flashActive) {
-            double panelW = bufferVisualSize * (cell + pad) - pad;
-            double panelH = cell + 8;
-            g.setStroke(Color.color(1,1,1,0.6));
-            g.setLineWidth(1.5);
-            g.strokeRect(x - 4, startY + 6, panelW + 8, panelH);
-        }
+        // Removed large gray border around the buffer during flash to meet UX request
 
         // Draw exactly bufferVisualSize cells: colored for available data, gray outline for unavailable
         int available = recentOutcomes.size();
@@ -157,9 +146,10 @@ public class HudRenderer {
 
     private void drawHalfOpenPanel(GraphicsContext g, Deque<Outcome> halfOpenOutcomes, int halfOpenMax, boolean flashActive) {
         // Place this panel below the first buffer panel
-        double x = 260, y = 56; // a bit lower than the first panel title
+        // Move this panel a bit further down so the Buffer panel's CLEARED label doesn't sit under this title
+        double x = 260, y = 76; // positioned safely below the buffer panel and its CLEARED label
         g.setFill(Color.color(1,1,1,0.9));
-        g.fillText("Half-Open trials (max " + halfOpenMax + ")", x, y);
+        g.fillText("Half-Open probes (max " + halfOpenMax + ")", x, y);
         double cell = 10;
         double pad = 2;
         double startY = y + 6;

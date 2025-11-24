@@ -83,7 +83,8 @@ public class BallFlowApp extends Application {
     private static final boolean IMAGE_SMOOTHING_IN_SCRUB = false; // keep text crisp when rendering snapshots
     private static final int CAPTURE_EVERY_N = 3; // fewer captures to extend scroll-back duration at full res
     private boolean scrubbing = false;
-    private boolean paused = false;
+    // Start paused so the animation waits for the user to press Play
+    private boolean paused = true;
     private Button playPauseButton;
     private Button restartButton;
     private Canvas canvasRef;
@@ -168,7 +169,8 @@ public class BallFlowApp extends Application {
 
     // Gaussian inter-arrival configuration for incoming requests (left -> right)
     // Mean and standard deviation in milliseconds with sensible clamping to avoid extremes
-    private static final long L2R_MEAN_MS = 500L;
+    // Increased mean to reduce the rate at which green balls depart upstream
+    private static final long L2R_MEAN_MS = 900L;
     private static final long L2R_STDDEV_MS = 150L;
     private static final long L2R_MIN_MS = 120L;
     private static final long L2R_MAX_MS = 1200L;
@@ -191,7 +193,8 @@ public class BallFlowApp extends Application {
         timeSlider.setOnMousePressed(e -> scrubbing = true);
         timeSlider.setOnMouseReleased(e -> scrubbing = false);
 
-        playPauseButton = new Button("Pause");
+        // Start in paused state; button should read "Play" initially
+        playPauseButton = new Button("Play");
         playPauseButton.setOnAction(e -> togglePause());
 
         restartButton = new Button("Restart");
@@ -411,9 +414,23 @@ public class BallFlowApp extends Application {
             } else if (tr.endsWith("to HALF_OPEN")) {
                 // When entering HALF_OPEN, start a fresh trial buffer; keep CLOSED buffer intact
                 halfOpenOutcomes.clear();
-                pushCbEvent("STATE " + tr + " — trials buffer cleared");
-                // Start a short visual flash for the trials buffer
+                pushCbEvent("STATE " + tr + " — probes buffer cleared");
+                // Start a short visual flash for the probes buffer
                 halfOpenBufferClearedFlashUntilMs = simElapsedMs + 3000; // 3 seconds visual flash
+            } else if (tr.endsWith("to CLOSED")) {
+                // When the CB closes, reset the main buffer so the HUD shows gray outlined boxes
+                // Also handle housekeeping similar to the generic branch
+                if (tr.startsWith("OPEN to")) {
+                    cbOpenUntilMs = -1L;
+                    cbOpenRemainingMs = -1L;
+                    deniedSinceOpen = 0L;
+                }
+                if (tr.startsWith("HALF_OPEN to")) {
+                    halfOpenOutcomes.clear();
+                }
+                recentOutcomes.clear();
+                bufferClearedFlashUntilMs = simElapsedMs + 3000; // flash "CLEARED" under buffer
+                pushCbEvent("STATE " + tr + " — buffer cleared");
             } else {
                 // any other transition
                 pushCbEvent("STATE " + tr);
@@ -703,6 +720,14 @@ public class BallFlowApp extends Application {
             }
         } else {
             cbOpenRemainingMs = -1L;
+        }
+
+        // Expire visual flash windows for buffer CLEARED badges (both CLOSED and HALF_OPEN panels)
+        if (bufferClearedFlashUntilMs >= 0 && simElapsedMs > bufferClearedFlashUntilMs) {
+            bufferClearedFlashUntilMs = -1L;
+        }
+        if (halfOpenBufferClearedFlashUntilMs >= 0 && simElapsedMs > halfOpenBufferClearedFlashUntilMs) {
+            halfOpenBufferClearedFlashUntilMs = -1L;
         }
     }
 
