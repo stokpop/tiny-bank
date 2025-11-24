@@ -993,17 +993,17 @@ public class BallFlowApp extends Application {
         // Avoid overlap with HUD bar above: ensure a safe minimum Y for top labels
         double safeTopLabelY = 140; // HUD bar ends around y≈120; keep some margin
         double departedY = Math.max(safeTopLabelY, leftBoxY - 8);
-        g.fillText("Departed: " + totalDepartedLeft, leftBoxX, departedY);
+        g.fillText("Departed upstream: " + totalDepartedLeft, leftBoxX, departedY);
 
         // Right box: cumulative totals (success/failure) placed in the grid
         double rx = rightBoxX;
         double ry = Math.max(safeTopLabelY, rightBoxY - 8);
-        g.fillText(String.format("Right box total — Success: %d  Failure: %d", totalRightSuccess, totalRightFailure), rx, ry);
+        g.fillText(String.format("Downstream total — Success: %d  Failure: %d", totalRightSuccess, totalRightFailure), rx, ry);
 
         // Left box bottom: totals of returned squares that crossed the CB on the way back
         double lbx = leftBoxX;
         double lby = leftBoxY + BOX_HEIGHT + 16;
-        g.fillText(String.format("Returned — Success: %d  Failure: %d  Not permitted: %d",
+        g.fillText(String.format("Returned upstream — Success: %d  Failure: %d  Not permitted: %d",
                 totalReturnedSuccess, totalReturnedFailure, totalReturnedNotPermitted), lbx, lby);
     }
 
