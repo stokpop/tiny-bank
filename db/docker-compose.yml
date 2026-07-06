@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:latest
+    image: postgres:18.4
     container_name: postgres-tiny-bank
     environment:
       POSTGRES_DB: tiny_bank_db

@@ -3,6 +3,14 @@ spring:
     name: tiny-bank
   jmx:
     enabled: true
+  # The SSL meter binder eagerly loads all registered SSL bundles at startup,
+  # which fails when the generated certs are not present (fresh checkout, tests).
+  # The bundle itself is only used when mtls.enabled=true.
+  autoconfigure:
+    exclude: org.springframework.boot.actuate.autoconfigure.ssl.SslObservabilityAutoConfiguration
+  # SSL bundle for mTLS (used when mtls.enabled=true)
+  # Spring Boot SSL Bundle configured to use generated PKCS12 client keystore and truststore
+  # Generate the certs with: ./mtls-certs/mtls-certificate-setup.sh
   ssl:
     bundle:
       jks:
@@ -62,6 +70,10 @@ management:
   health:
     circuitbreakers:
       enabled: true
+    # The SSL health indicator eagerly loads all registered SSL bundles at
+    # startup, see spring.autoconfigure.exclude above.
+    ssl:
+      enabled: false
   endpoint:
     health:
       show-details: always
@@ -71,11 +83,12 @@ management:
         readiness:
           include: db,circuitBreakers
 
-# Remote services / mTLS
+# Toggle mTLS on/off (can be overridden via -Dmtls.enabled=true or env MTLS_ENABLED=true)
 mtls:
   enabled: false
 
-# Remote service endpoints
+# HTTP and HTTPS endpoints for the stubbed remote services
+# The https endpoints (with client auth) are used when mtls.enabled=true
 remote:
   account:
     service:
