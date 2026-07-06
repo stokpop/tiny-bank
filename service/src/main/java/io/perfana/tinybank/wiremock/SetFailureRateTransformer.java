@@ -1,7 +1,6 @@
 package io.perfana.tinybank.wiremock;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectReader;
+import com.github.tomakehurst.wiremock.common.Json;
 import com.github.tomakehurst.wiremock.extension.ResponseTransformerV2;
 import com.github.tomakehurst.wiremock.http.Response;
 import com.github.tomakehurst.wiremock.stubbing.ServeEvent;
@@ -13,15 +12,13 @@ import java.util.Map;
  */
 public class SetFailureRateTransformer implements ResponseTransformerV2 {
 
-    public static final ObjectReader MAP_READER = new ObjectMapper().readerFor(Map.class);
-
     @Override
     public Response transform(Response response, ServeEvent serveEvent) {
         try {
-            String body = serveEvent.getRequest().getBodyAsString();
+            String body =serveEvent.getRequest().getBodyAsString();
             System.out.println("Received request to set failure rate: " + body);
 
-            Map<String, Object> params = MAP_READER.readValue(body);
+            Map<String, Object> params = Json.read(body, Map.class);
 
             if (params.containsKey("rate")) {
                 int rate = Integer.parseInt(params.get("rate").toString());
