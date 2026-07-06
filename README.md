@@ -241,12 +241,10 @@ Option B: JVM flag per process
   java -Dmtls.enabled=true -jar service/target/tiny-bank-service-0.0.1-SNAPSHOT.jar
 
 Notes
-- The default keystore/truststore locations are configured in service/src/main/resources/application.properties and point to target/generated-certs:
-  - mtls.keystore.path=target/generated-certs/client.p12
-  - mtls.keystore.password=changeit
-  - mtls.truststore.path=target/generated-certs/client-truststore.p12
-  - mtls.truststore.password=changeit
-- You can override any of these with -Dmtls.keystore.path=..., etc.
+- The client keystore/truststore locations are configured as a Spring SSL bundle (`mtls-client`) in service/src/main/resources/application.yml and point to target/generated-certs:
+  - spring.ssl.bundle.jks.mtls-client.keystore.location=target/generated-certs/client.p12
+  - spring.ssl.bundle.jks.mtls-client.truststore.location=target/generated-certs/client-truststore.p12
+- You can override any of these with -Dspring.ssl.bundle.jks.mtls-client.keystore.location=..., etc.
 - The WireMock stubs will listen on their normal HTTP ports; with mTLS enabled they also expose HTTPS on 31123/31124 and require client auth.
 - The service automatically selects the https base URLs when mTLS is enabled.
 
@@ -259,7 +257,7 @@ Notes
 
 4) Quick verification
 - After starting with mTLS enabled, the service logs will contain:
-  mTLS is enabled: configuring SSLContext for Apache HttpClient
+  mTLS is enabled: configuring Apache HttpClient with SSLContext from Spring SSL bundle
 - The Account and Balance WireMock processes will start HTTPS listeners on ports 31123 and 31124 respectively.
 
 ## Credits
