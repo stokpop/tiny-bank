@@ -162,7 +162,6 @@ if [ "$MTLS_FLAG_LOWER_CASE" = "true" ]; then
   BALANCE_PORT=31124
 else
   ACCOUNT_PORT=30123
-
   BALANCE_PORT=30124
 fi
 
