@@ -5,12 +5,36 @@ import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
 public class BalanceWireMock {
+
+    private static boolean isMtlsEnabled() {
+        String sys = System.getProperty("mtls.enabled");
+        String env = System.getenv("MTLS_ENABLED");
+        return (sys != null && sys.equalsIgnoreCase("true")) || (env != null && env.equalsIgnoreCase("true"));
+    }
+
     public static void main(String[] args) {
+
+        boolean mtls = isMtlsEnabled();
+
         WireMockConfiguration options = WireMockConfiguration.options()
                 .port(30124)
                 .disableRequestJournal()
                 .asynchronousResponseEnabled(true)
                 .asynchronousResponseThreads(256);
+
+        if (mtls) {
+            System.out.println("mTLS enabled for BalanceWireMock: using keystore target/generated-certs/server.p12");
+            options = options
+                    .httpsPort(31124)
+                    .keystorePath("target/generated-certs/server.p12")
+                    .keystorePassword("changeit")
+                    .keyManagerPassword("changeit")
+                    .keystoreType("PKCS12")
+                    .trustStorePath("target/generated-certs/server-truststore.p12")
+                    .trustStorePassword("changeit")
+                    .trustStoreType("PKCS12")
+                    .needClientAuth(true);
+        }
 
         WireMockServer wireMockServer = new WireMockServer(options);
         wireMockServer.start();
