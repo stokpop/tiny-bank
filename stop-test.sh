@@ -1,7 +1,20 @@
 #!/usr/bin/env bash
 
-for port in {30123,30124,18080,13000};
-do
+# Determine stub ports based on mTLS setting
+# If MTLS_ENABLED is true (case-insensitive), use HTTPS ports 31123/31124; otherwise HTTP ports 30123/30124
+MTLS_FLAG_LOWER_CASE=$(printf '%s' "${MTLS_ENABLED:-}" | tr '[:upper:]' '[:lower:]')
+if [ "$MTLS_FLAG_LOWER_CASE" = "true" ]; then
+  ACCOUNT_PORT=31123
+  BALANCE_PORT=31124
+else
+  ACCOUNT_PORT=30123
+  BALANCE_PORT=30124
+fi
+
+# Use indexed array for portability with older Bash (e.g., macOS 3.2)
+ports=("$ACCOUNT_PORT" "$BALANCE_PORT" 18080 13000)
+
+for port in "${ports[@]}"; do
   # Get the process IDs listening on port
   pids=$(lsof -t -i:$port -sTCP:LISTEN)
 
@@ -31,7 +44,14 @@ docker compose down
 cd - > /dev/null 2>&1
 
 # Check if --shutdown-metrics flag is present: stop the metrics components
-if [[ " $@ " == *" --shutdown-metrics "* ]]; then
+SHUTDOWN_METRICS=false
+for arg in "$@"; do
+  if [ "$arg" = "--shutdown-metrics" ]; then
+    SHUTDOWN_METRICS=true
+    break
+  fi
+done
+if [ "$SHUTDOWN_METRICS" = true ]; then
   cd metrics
   docker compose down
   cd - > /dev/null 2>&1
